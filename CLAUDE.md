@@ -1,5 +1,11 @@
 # Admin Wilrijk — Tuition Management System
 
+## IMPORTANT: Environment Note
+User runs **Claude Code on the web**. There is NO local browser access.
+- Never suggest opening `localhost:3000` — the user cannot see it
+- To preview the app, deploy to **Vercel** (the only option)
+- `.env.local` exists on this server but is gitignored
+
 ## Project Overview
 Tuition fee management system replacing Excel-based tracking for Beit Midrash Wilrijk.
 Critical requirement: accessible UI for a 93-year-old gabbai who manages finances via spreadsheet.
