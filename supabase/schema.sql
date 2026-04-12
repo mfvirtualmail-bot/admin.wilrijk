@@ -141,5 +141,7 @@ INSERT INTO settings (key, value) VALUES
   ('school_name', '"Beit Midrash Wilrijk"'),
   ('currency', '"EUR"'),
   ('academic_year_start_month', '9'),
-  ('academic_year_end_month', '7')
+  ('academic_year_end_month', '8'),
+  ('payment_method_labels', '{"crc":"Credit Card","kas":"Cash","bank":"Bank Transfer","other":"Other"}'),
+  ('default_payment_method', '"kas"')
 ON CONFLICT (key) DO NOTHING;
