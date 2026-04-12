@@ -16,6 +16,7 @@ import {
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
 import { METHOD_LABELS } from "@/lib/payment-utils";
+import { academicYearLabel } from "@/lib/hebrew-date";
 import type { PaymentMethod } from "@/lib/types";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -29,10 +30,9 @@ const gridTheme = themeQuartz.withParams({
   headerFontWeight: 600,
 });
 
-const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const METHODS = Object.keys(METHOD_LABELS) as PaymentMethod[];
 
-interface MonthMeta { month: number; year: number; key: string }
+interface MonthMeta { month: number; year: number; key: string; hebrewLabel: string }
 
 interface SpreadsheetRow {
   familyId: string;
@@ -181,8 +181,8 @@ export default function SpreadsheetPage() {
     ];
 
     // One column group per month
-    for (const { month, year, key } of months) {
-      const label = `${MONTH_NAMES[month]} ${String(year).slice(2)}`;
+    for (const { hebrewLabel, key } of months) {
+      const label = hebrewLabel;
       cols.push({
         headerName: label,
         groupId: key,
@@ -312,9 +312,8 @@ export default function SpreadsheetPage() {
   async function handleExport() {
     const { utils, writeFile } = await import("xlsx");
     const headers = ["Family"];
-    for (const { month, year } of months) {
-      const label = `${MONTH_NAMES[month]} ${year}`;
-      headers.push(`${label} Date`, `${label} COM`, `${label} €`);
+    for (const { hebrewLabel } of months) {
+      headers.push(`${hebrewLabel} Date`, `${hebrewLabel} COM`, `${hebrewLabel} €`);
     }
     headers.push("Total Charged", "Total Paid", "Balance");
 
@@ -349,8 +348,8 @@ export default function SpreadsheetPage() {
 
       {/* Toolbar */}
       <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200 text-sm flex-wrap">
-        <span className="font-semibold text-gray-700">
-          Academic Year {academicYear}–{academicYear + 1}
+        <span className="font-semibold text-gray-700" dir="rtl">
+          {academicYear ? academicYearLabel(academicYear) : ""}
         </span>
         <span className="text-gray-400">|</span>
         <span className="text-gray-600">{rowData.length} families</span>

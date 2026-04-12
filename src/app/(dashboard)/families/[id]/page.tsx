@@ -5,7 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, METHOD_COLORS, MONTHS, formatDate, formatEur } from "@/lib/payment-utils";
+import { METHOD_LABELS, METHOD_COLORS, formatDate, formatEur } from "@/lib/payment-utils";
+import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import type { Family, Child, Payment, PaymentMethod } from "@/lib/types";
 
 interface FamilyData {
@@ -15,7 +16,15 @@ interface FamilyData {
   balance: { charged: number; paid: number; due: number };
 }
 
-const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7];
+const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
+
+// Build a flat list of {month, year} for the current academic year
+function academicMonthOptions(baseYear: number) {
+  return ACADEMIC_MONTHS.map((m) => {
+    const year = m >= 9 ? baseYear : baseYear + 1;
+    return { month: m, year, label: hebrewMonthLabel(m, year) };
+  });
+}
 
 export default function FamilyDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -143,7 +152,8 @@ export default function FamilyDetailPage() {
 
   const canEdit = user?.is_super_admin;
   const currentYear = new Date().getFullYear();
-  const yearOptions = [currentYear - 1, currentYear, currentYear + 1];
+  const baseYear = new Date().getMonth() + 1 >= 9 ? currentYear : currentYear - 1;
+  const monthOptions = academicMonthOptions(baseYear);
 
   if (loading) return <div className="p-8 text-gray-500">Loading…</div>;
   if (error) return <div className="p-8 text-red-600">{error}</div>;
@@ -354,22 +364,24 @@ export default function FamilyDetailPage() {
                   <span className="text-sm font-medium text-gray-700">Allocate to a specific month</span>
                 </label>
                 {payForm.allocate && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <select value={payForm.month} onChange={(e) => setPayForm((p) => ({ ...p, month: e.target.value }))}
-                      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">— Month —</option>
-                      {ACADEMIC_MONTHS.map((m) => <option key={m} value={m}>{MONTHS[m]}</option>)}
-                    </select>
-                    <select value={payForm.year} onChange={(e) => setPayForm((p) => ({ ...p, year: e.target.value }))}
-                      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">— Year —</option>
-                      {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+                  <div>
+                    <select
+                      value={payForm.month && payForm.year ? `${payForm.month}:${payForm.year}` : ""}
+                      onChange={(e) => {
+                        const [m, y] = e.target.value.split(":");
+                        setPayForm((p) => ({ ...p, month: m ?? "", year: y ?? "" }));
+                      }}
+                      className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
+                      <option value="">— בחר חודש —</option>
+                      {monthOptions.map(({ month, year, label }) => (
+                        <option key={`${month}:${year}`} value={`${month}:${year}`}>{label}</option>
+                      ))}
                     </select>
                   </div>
                 )}
                 {payForm.allocate && payForm.month && payForm.year && (
-                  <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1">
-                    Allocating to: <strong>{MONTHS[Number(payForm.month)]} {payForm.year}</strong>
+                  <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1" dir="rtl">
+                    Allocating to: <strong>{hebrewMonthLabel(Number(payForm.month), Number(payForm.year))}</strong>
                   </p>
                 )}
               </div>
@@ -406,8 +418,8 @@ export default function FamilyDetailPage() {
                         {METHOD_LABELS[p.payment_method]}
                       </span>
                     </td>
-                    <td className="py-2 text-gray-600">
-                      {p.month && p.year ? `${MONTHS[p.month]} ${p.year}` : <span className="text-gray-400 italic text-xs">Unallocated</span>}
+                    <td className="py-2 text-gray-600" dir={p.month && p.year ? "rtl" : undefined}>
+                      {p.month && p.year ? hebrewMonthLabel(p.month, p.year) : <span className="text-gray-400 italic text-xs">Unallocated</span>}
                     </td>
                     <td className="py-2 text-gray-500 text-xs max-w-xs truncate">{p.notes ?? "—"}</td>
                     <td className="py-2 text-right font-semibold text-gray-900">{formatEur(Number(p.amount))}</td>

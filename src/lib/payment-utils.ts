@@ -14,8 +14,8 @@ export const METHOD_COLORS: Record<PaymentMethod, string> = {
   other: "bg-gray-100 text-gray-600",
 };
 
-// Academic year months in order: Sep → Jul
-export const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7];
+// Academic year months in order: Sep → Aug (אלול → אב)
+export const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
 export const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 

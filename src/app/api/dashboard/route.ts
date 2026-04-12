@@ -24,8 +24,8 @@ export async function GET() {
 
   const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
   const monthlyTuitionTotal = (chargesRes.data ?? []).reduce((s, c) => s + Number(c.monthly_tuition), 0);
-  // Academic months Sep → Jul = 11 months
-  const totalCharged = monthlyTuitionTotal * 11;
+  // Academic months Sep → Aug = 12 months (אלול → אב)
+  const totalCharged = monthlyTuitionTotal * 12;
   const totalDue = Math.max(0, totalCharged - totalPaid);
 
   return NextResponse.json({

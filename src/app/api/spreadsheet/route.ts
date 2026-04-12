@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { hebrewMonthLabel } from "@/lib/hebrew-date";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -21,7 +22,7 @@ function getAcademicYear(date = new Date()) {
 const ACADEMIC_MONTHS = [
   { month: 9 }, { month: 10 }, { month: 11 }, { month: 12 },
   { month: 1 }, { month: 2 }, { month: 3 }, { month: 4 },
-  { month: 5 }, { month: 6 }, { month: 7 },
+  { month: 5 }, { month: 6 }, { month: 7 }, { month: 8 },
 ];
 
 function monthYear(baseYear: number, month: number) {
@@ -124,6 +125,10 @@ export async function GET() {
   return NextResponse.json({
     rows,
     academicYear,
-    months: months.map((m) => ({ ...m, key: `m_${m.month}_${m.year}` })),
+    months: months.map((m) => ({
+      ...m,
+      key: `m_${m.month}_${m.year}`,
+      hebrewLabel: hebrewMonthLabel(m.month, m.year),
+    })),
   });
 }

@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
-import { METHOD_LABELS, MONTHS } from "@/lib/payment-utils";
+import { METHOD_LABELS } from "@/lib/payment-utils";
+import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import type { Family, PaymentMethod } from "@/lib/types";
 
-// Academic year months in order: Sep→Oct→Nov→Dec→Jan→Feb→Mar→Apr→May→Jun→Jul
-const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7];
+// Academic year months: Sep → Aug (אלול → אב)
+const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
 function nextUnpaidMonth(charges: { month: number; year: number }[], payments: { month: number | null; year: number | null }[]) {
   const paidSet = new Set(payments.filter((p) => p.month && p.year).map((p) => `${p.year}-${p.month}`));
@@ -111,7 +112,11 @@ export default function NewPaymentPage() {
   }
 
   const currentYear = new Date().getFullYear();
-  const yearOptions = [currentYear - 1, currentYear, currentYear + 1];
+  const baseYear = new Date().getMonth() + 1 >= 9 ? currentYear : currentYear - 1;
+  const monthOptions = ACADEMIC_MONTHS.map((m) => {
+    const yr = m >= 9 ? baseYear : baseYear + 1;
+    return { month: m, year: yr, label: hebrewMonthLabel(m, yr) };
+  });
 
   return (
     <div>
@@ -172,25 +177,21 @@ export default function NewPaymentPage() {
               </div>
 
               {allocateMonth && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
-                    <select value={month} onChange={(e) => setMonth(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-                      <option value="">— Month —</option>
-                      {ACADEMIC_MONTHS.map((m) => (
-                        <option key={m} value={m}>{MONTHS[m]}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Year</label>
-                    <select value={year} onChange={(e) => setYear(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-                      <option value="">— Year —</option>
-                      {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
+                  <select
+                    value={month && year ? `${month}:${year}` : ""}
+                    onChange={(e) => {
+                      const [m, y] = e.target.value.split(":");
+                      setMonth(m ?? "");
+                      setYear(y ?? "");
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" dir="rtl">
+                    <option value="">— בחר חודש —</option>
+                    {monthOptions.map(({ month: m, year: y, label }) => (
+                      <option key={`${m}:${y}`} value={`${m}:${y}`}>{label}</option>
+                    ))}
+                  </select>
                 </div>
               )}
 
@@ -201,8 +202,8 @@ export default function NewPaymentPage() {
               )}
 
               {autoMonth && allocateMonth && (
-                <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1">
-                  Auto-detected next due month: <strong>{MONTHS[autoMonth.month]} {autoMonth.year}</strong>
+                <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1" dir="rtl">
+                  Auto-detected next due month: <strong>{hebrewMonthLabel(autoMonth.month, autoMonth.year)}</strong>
                 </p>
               )}
             </div>
