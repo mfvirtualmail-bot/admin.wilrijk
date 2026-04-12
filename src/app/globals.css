@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f9fafb;
+  --foreground: #111827;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+}
+
+/* RTL support */
+[dir="rtl"] .sidebar-nav {
+  text-align: right;
+}
+
+/* AG Grid overrides for accessibility */
+.ag-theme-alpine .ag-cell {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.ag-theme-alpine .ag-header-cell-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Payment status colors */
+.cell-paid {
+  background-color: #dcfce7 !important;
+}
+
+.cell-unpaid {
+  background-color: #fee2e2 !important;
+}
+
+.cell-partial {
+  background-color: #fef9c3 !important;
+}
