@@ -50,7 +50,6 @@ export default function FamiliesImportPage() {
     errors: Array<{ row: number; message: string }>;
   } | null>(null);
 
-  const [importing, setImporting] = useState(false);
   const [fileError, setFileError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -112,7 +111,7 @@ export default function FamiliesImportPage() {
   // ── Step 4: Import ──
 
   async function handleImport() {
-    setImporting(true);
+
     setStep("importing");
     try {
       const res = await fetch("/api/families/import", {
@@ -132,14 +131,13 @@ export default function FamiliesImportPage() {
       alert("Network error during import");
       setStep("preview");
     } finally {
-      setImporting(false);
+
     }
   }
 
   // ── Render helpers ──
 
   const sampleRows = rows.slice(0, 4);
-  const fieldLabel = (key: string) => FAMILY_FIELDS.find((f) => f.key === key)?.label ?? key;
 
   return (
     <div>

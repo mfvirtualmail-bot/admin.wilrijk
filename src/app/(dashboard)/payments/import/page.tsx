@@ -33,12 +33,6 @@ function buildMonthOptions(academicYear: number) {
   });
 }
 
-const METHODS = [
-  { value: "crc", label: "CRC (Credit Card)" },
-  { value: "kas", label: "Kas (Cash)" },
-  { value: "bank", label: "Bank Transfer" },
-  { value: "other", label: "Other" },
-];
 
 export default function PaymentsImportPage() {
   const [step, setStep] = useState<WizardStep>("upload");
@@ -69,7 +63,6 @@ export default function PaymentsImportPage() {
     errors: Array<{ row: number; family: string; message: string }>;
   } | null>(null);
 
-  const [importing, setImporting] = useState(false);
   const [fileError, setFileError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -195,7 +188,7 @@ export default function PaymentsImportPage() {
       }))
       .filter((p) => p.family_id); // only send matched payments
 
-    setImporting(true);
+
     setStep("importing");
     try {
       const res = await fetch("/api/payments/import", {
@@ -215,7 +208,7 @@ export default function PaymentsImportPage() {
       alert("Network error during import");
       setStep("preview");
     } finally {
-      setImporting(false);
+
     }
   }
 
