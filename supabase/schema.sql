@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS families (
   name VARCHAR(200) NOT NULL,
   father_name VARCHAR(200),
   mother_name VARCHAR(200),
+  hebrew_name VARCHAR(200),          -- Hebrew family name
+  hebrew_father_name VARCHAR(200),   -- Hebrew father's name
   address TEXT,
   city VARCHAR(100),
   postal_code VARCHAR(20),
@@ -62,6 +64,7 @@ CREATE TABLE IF NOT EXISTS children (
   family_id UUID NOT NULL REFERENCES families(id) ON DELETE CASCADE,
   first_name VARCHAR(200) NOT NULL,
   last_name VARCHAR(200) NOT NULL,
+  hebrew_name VARCHAR(200),          -- Hebrew name of the student
   date_of_birth DATE,
   class_name VARCHAR(100),
   monthly_tuition DECIMAL(10,2) NOT NULL DEFAULT 0,

@@ -24,6 +24,8 @@ export interface Family {
   name: string;
   father_name: string | null;
   mother_name: string | null;
+  hebrew_name: string | null;
+  hebrew_father_name: string | null;
   address: string | null;
   city: string | null;
   postal_code: string | null;
@@ -40,6 +42,7 @@ export interface Child {
   family_id: string;
   first_name: string;
   last_name: string;
+  hebrew_name: string | null;
   date_of_birth: string | null;
   class_name: string | null;
   monthly_tuition: number;

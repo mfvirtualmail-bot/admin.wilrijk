@@ -362,7 +362,7 @@ export default function FamiliesImportPage() {
                   <div className="text-2xl font-bold">
                     {families.reduce((s, f) => s + f.children.length, 0)}
                   </div>
-                  <div>Children to import</div>
+                  <div>Students to import</div>
                 </div>
                 {parseErrors.length > 0 && (
                   <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-800">
@@ -423,7 +423,7 @@ export default function FamiliesImportPage() {
                         <th className="text-left px-4 py-2 font-semibold text-gray-600">City</th>
                         <th className="text-left px-4 py-2 font-semibold text-gray-600">Phone</th>
                         <th className="text-left px-4 py-2 font-semibold text-gray-600">Email</th>
-                        <th className="text-left px-4 py-2 font-semibold text-gray-600">Children</th>
+                        <th className="text-left px-4 py-2 font-semibold text-gray-600">Students</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -437,11 +437,11 @@ export default function FamiliesImportPage() {
                           <td className="px-4 py-2">
                             {f.children.length > 0 ? (
                               <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs font-medium">
-                                {f.children.length} {f.children.length === 1 ? "child" : "children"}:{" "}
+                                {f.children.length} {f.children.length === 1 ? "student" : "students"}:{" "}
                                 {f.children.map((c) => c.first_name).join(", ")}
                               </span>
                             ) : (
-                              <span className="text-gray-400 text-xs">No children</span>
+                              <span className="text-gray-400 text-xs">No students</span>
                             )}
                           </td>
                         </tr>
@@ -496,7 +496,7 @@ export default function FamiliesImportPage() {
               <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto">
                 {[
                   { label: "Families created", value: importResult.created.families, color: "text-green-700" },
-                  { label: "Children added", value: importResult.created.children, color: "text-green-700" },
+                  { label: "Students added", value: importResult.created.children, color: "text-green-700" },
                   { label: "Families updated", value: importResult.updated.families, color: "text-blue-700" },
                   { label: "Families skipped", value: importResult.skipped, color: "text-gray-600" },
                 ].map(({ label, value, color }) => (

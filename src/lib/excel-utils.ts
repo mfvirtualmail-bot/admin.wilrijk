@@ -76,8 +76,11 @@ const FAMILY_HEADER_HINTS: Record<string, string[]> = {
   family_name:      ["familienaam", "family", "naam", "name", "achternaam", "familie"],
   father_name:      ["vader", "father", "voorn vader", "voornaam vader", "vaders naam"],
   mother_name:      ["moeder", "mother", "voorn moeder", "voornaam moeder"],
-  child_first_name: ["bochur", "voorn bochur", "kind", "child", "student", "voornaam kind", "leerling"],
+  hebrew_family_name: ["שם משפ", "שם משפחה", "hebrew family", "hebrew name"],
+  hebrew_father_name: ["שם אב", "שם האב", "hebrew father"],
+  child_first_name: ["bochur", "voorn bochur", "kind", "child", "student", "voornaam kind", "leerling", "שם בוחר"],
   child_last_name:  ["achternaam kind", "kind achternaam"],
+  child_hebrew_name: ["שם בחור", "hebrew student", "hebrew child"],
   child_dob:        ["geb", "geb. datum", "geboortedatum", "birth", "date of birth", "dob", "datum"],
   address:          ["adres", "address", "straat", "street"],
   postal_code:      ["postc", "postcode", "postal", "zip", "post"],
@@ -90,21 +93,24 @@ const FAMILY_HEADER_HINTS: Record<string, string[]> = {
 };
 
 export const FAMILY_FIELDS: { key: string; label: string; required?: boolean }[] = [
-  { key: "family_name",      label: "Family Name (Familienaam)",      required: true },
-  { key: "father_name",      label: "Father's First Name (Voorn Vader)" },
-  { key: "mother_name",      label: "Mother's First Name (Voorn Moeder)" },
-  { key: "child_first_name", label: "Child First Name (Voorn Bochur)" },
-  { key: "child_last_name",  label: "Child Last Name" },
-  { key: "child_dob",        label: "Birth Date (Geb. Datum)" },
-  { key: "address",          label: "Address (Adres)" },
-  { key: "postal_code",      label: "Postal Code (Postcode)" },
-  { key: "city",             label: "City (Gemeente)" },
-  { key: "phone",            label: "Phone (Tel)" },
-  { key: "rijksregister",    label: "National Registry (Rijksregister)" },
-  { key: "email",            label: "Email" },
-  { key: "monthly_tuition",  label: "Monthly Tuition (€)" },
-  { key: "notes",            label: "Notes" },
-  { key: "skip",             label: "— Skip this column —" },
+  { key: "family_name",        label: "Family Name (Familienaam)",        required: true },
+  { key: "father_name",        label: "Father's First Name (Voorn Vader)" },
+  { key: "mother_name",        label: "Mother's First Name (Voorn Moeder)" },
+  { key: "hebrew_family_name", label: "Hebrew Family Name (שם משפחה)" },
+  { key: "hebrew_father_name", label: "Hebrew Father's Name (שם אב)" },
+  { key: "child_first_name",   label: "Student First Name (Voorn Bochur)" },
+  { key: "child_last_name",    label: "Student Last Name" },
+  { key: "child_hebrew_name",  label: "Student Hebrew Name (שם בחור)" },
+  { key: "child_dob",          label: "Birth Date (Geb. Datum)" },
+  { key: "address",            label: "Address (Adres)" },
+  { key: "postal_code",        label: "Postal Code (Postcode)" },
+  { key: "city",               label: "City (Gemeente)" },
+  { key: "phone",              label: "Phone (Tel)" },
+  { key: "rijksregister",      label: "National Registry (Rijksregister)" },
+  { key: "email",              label: "Email" },
+  { key: "monthly_tuition",    label: "Monthly Tuition (€)" },
+  { key: "notes",              label: "Notes" },
+  { key: "skip",               label: "— Skip this column —" },
 ];
 
 /**
@@ -311,6 +317,7 @@ export function gregorianMonthToHebrew(month: number): string {
 export interface ImportChild {
   first_name: string;
   last_name: string;
+  hebrew_name: string | null;
   date_of_birth: string | null;
   monthly_tuition: number;
   notes: string | null;
@@ -320,6 +327,8 @@ export interface ImportFamily {
   name: string;
   father_name: string | null;
   mother_name: string | null;
+  hebrew_name: string | null;
+  hebrew_father_name: string | null;
   address: string | null;
   city: string | null;
   postal_code: string | null;
@@ -370,6 +379,8 @@ export function processFamilyRows(
         name: familyName,
         father_name: fatherName,
         mother_name: get("mother_name") || null,
+        hebrew_name: get("hebrew_family_name") || null,
+        hebrew_father_name: get("hebrew_father_name") || null,
         address: get("address") || null,
         city: get("city") || null,
         postal_code: get("postal_code") || null,
@@ -388,6 +399,8 @@ export function processFamilyRows(
     // Update family contact fields if we have better data now
     if (!family.father_name) family.father_name = get("father_name") || null;
     if (!family.mother_name) family.mother_name = get("mother_name") || null;
+    if (!family.hebrew_name) family.hebrew_name = get("hebrew_family_name") || null;
+    if (!family.hebrew_father_name) family.hebrew_father_name = get("hebrew_father_name") || null;
     if (!family.address) family.address = get("address") || null;
     if (!family.city) family.city = get("city") || null;
     if (!family.postal_code) family.postal_code = get("postal_code") || null;
@@ -398,6 +411,7 @@ export function processFamilyRows(
     const childFirstName = get("child_first_name");
     if (childFirstName) {
       const lastName = get("child_last_name") || familyName;
+      const hebrewName = get("child_hebrew_name") || null;
       const dob = parseEuropeanDate(get("child_dob"));
       const tuition = parseAmount(get("monthly_tuition")) ?? 0;
       const rijks = get("rijksregister");
@@ -405,6 +419,7 @@ export function processFamilyRows(
       family.children.push({
         first_name: childFirstName,
         last_name: lastName,
+        hebrew_name: hebrewName,
         date_of_birth: dob,
         monthly_tuition: tuition,
         notes: rijks ? `Rijksregister: ${rijks}` : null,

@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const {
-    family_id, first_name, last_name, monthly_tuition, class_name,
+    family_id, first_name, last_name, hebrew_name, monthly_tuition, class_name,
     date_of_birth, enrollment_date, notes, currency,
     enrollment_start_month, enrollment_start_year, enrollment_end_month, enrollment_end_year,
   } = body;
@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
     .from("children")
     .insert({
       family_id, first_name: first_name.trim(), last_name: last_name.trim(),
+      hebrew_name: hebrew_name?.trim() || null,
       monthly_tuition: monthly_tuition ?? 0, currency: currency ?? "EUR",
       class_name, date_of_birth, enrollment_date, notes,
       enrollment_start_month: enrollment_start_month ?? null,

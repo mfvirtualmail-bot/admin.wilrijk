@@ -13,6 +13,7 @@ async function getSessionUser() {
 interface ImportChild {
   first_name: string;
   last_name: string;
+  hebrew_name: string | null;
   date_of_birth: string | null;
   monthly_tuition: number;
   notes: string | null;
@@ -22,6 +23,8 @@ interface ImportFamily {
   name: string;
   father_name: string | null;
   mother_name: string | null;
+  hebrew_name: string | null;
+  hebrew_father_name: string | null;
   address: string | null;
   city: string | null;
   postal_code: string | null;
@@ -81,9 +84,7 @@ export async function POST(req: NextRequest) {
         continue;
       } else {
         // Update the existing family
-        const { error } = await db
-          .from("families")
-          .update({
+        const updateData: Record<string, unknown> = {
             father_name: importFamily.father_name,
             mother_name: importFamily.mother_name,
             address: importFamily.address,
@@ -94,7 +95,12 @@ export async function POST(req: NextRequest) {
             notes: importFamily.rijksregister
               ? `Rijksregister: ${importFamily.rijksregister}${importFamily.notes ? "\n" + importFamily.notes : ""}`
               : importFamily.notes,
-          })
+        };
+        if (importFamily.hebrew_name) updateData.hebrew_name = importFamily.hebrew_name;
+        if (importFamily.hebrew_father_name) updateData.hebrew_father_name = importFamily.hebrew_father_name;
+        const { error } = await db
+          .from("families")
+          .update(updateData)
           .eq("id", existingId);
         if (error) {
           errors.push({ row: 0, message: `Failed to update ${importFamily.name}: ${error.message}` });
@@ -111,6 +117,8 @@ export async function POST(req: NextRequest) {
           name: importFamily.name,
           father_name: importFamily.father_name,
           mother_name: importFamily.mother_name,
+          hebrew_name: importFamily.hebrew_name,
+          hebrew_father_name: importFamily.hebrew_father_name,
           address: importFamily.address,
           city: importFamily.city,
           postal_code: importFamily.postal_code,
@@ -140,6 +148,7 @@ export async function POST(req: NextRequest) {
         family_id: fid,
         first_name: c.first_name,
         last_name: c.last_name,
+        hebrew_name: c.hebrew_name,
         date_of_birth: c.date_of_birth,
         monthly_tuition: c.monthly_tuition,
         notes: c.notes,
