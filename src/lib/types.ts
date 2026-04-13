@@ -17,6 +17,8 @@ export interface Session {
   created_at: string;
 }
 
+export type Currency = "EUR" | "USD" | "GBP";
+
 export interface Family {
   id: string;
   name: string;
@@ -41,8 +43,13 @@ export interface Child {
   date_of_birth: string | null;
   class_name: string | null;
   monthly_tuition: number;
+  currency: Currency;
   is_active: boolean;
   enrollment_date: string | null;
+  enrollment_start_month: number | null;
+  enrollment_start_year: number | null;
+  enrollment_end_month: number | null;
+  enrollment_end_year: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -55,6 +62,7 @@ export interface Charge {
   month: number;
   year: number;
   amount: number;
+  currency: Currency;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -66,6 +74,7 @@ export interface Payment {
   id: string;
   family_id: string;
   amount: number;
+  currency: Currency;
   payment_date: string;
   payment_method: PaymentMethod;
   month: number | null;

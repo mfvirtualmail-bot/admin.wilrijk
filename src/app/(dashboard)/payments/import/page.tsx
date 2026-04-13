@@ -53,7 +53,7 @@ export default function PaymentsImportPage() {
   const [parseErrors, setParseErrors] = useState<Array<{ row: number; message: string }>>([]);
 
   // Family matching: name → db family id (populated from API)
-  const [dbFamilies, setDbFamilies] = useState<{ id: string; name: string }[]>([]);
+  const [dbFamilies, setDbFamilies] = useState<{ id: string; name: string; father_name: string | null }[]>([]);
   const [familyMatchOverrides, setFamilyMatchOverrides] = useState<Record<string, string>>({}); // excel-name → family-id or ""
 
   // Import result
@@ -153,7 +153,7 @@ export default function PaymentsImportPage() {
         const overrides: Record<string, string> = {};
         const uniqueNames = Array.from(new Set(pms.map((p) => p.family_name)));
         uniqueNames.forEach((name) => {
-          const match = (data.families as { id: string; name: string }[]).find(
+          const match = (data.families as { id: string; name: string; father_name: string | null }[]).find(
             (f) => f.name.toLowerCase().trim() === name.toLowerCase().trim()
           );
           overrides[name] = match?.id ?? "";
@@ -548,7 +548,7 @@ export default function PaymentsImportPage() {
                               <option value="">— Skip this family —</option>
                               {dbFamilies.map((f) => (
                                 <option key={f.id} value={f.id}>
-                                  {f.name}
+                                  {f.father_name ? `${f.name} (${f.father_name})` : f.name}
                                 </option>
                               ))}
                             </select>

@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   let query = db
     .from("payments")
-    .select("*, families(name)")
+    .select("*, families(name, father_name)")
     .order("payment_date", { ascending: false });
   if (familyId) query = query.eq("family_id", familyId);
 
@@ -40,15 +40,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { family_id, amount, payment_date, payment_method, month, year, reference, notes } = body;
+  const { family_id, amount, payment_date, payment_method, month, year, reference, notes, currency } = body;
   if (!family_id || !amount || !payment_date || !payment_method)
     return NextResponse.json({ error: "family_id, amount, payment_date and payment_method are required" }, { status: 400 });
 
   const db = createServerClient();
+
   const { data, error } = await db
     .from("payments")
-    .insert({ family_id, amount: Number(amount), payment_date, payment_method, month, year, reference, notes })
-    .select("*, families(name)")
+    .insert({ family_id, amount: Number(amount), payment_date, payment_method, month, year, reference, notes, currency: currency ?? "EUR" })
+    .select("*, families(name, father_name)")
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ payment: data }, { status: 201 });

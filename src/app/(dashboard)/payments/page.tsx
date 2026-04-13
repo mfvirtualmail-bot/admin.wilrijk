@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, METHOD_COLORS, MONTHS, formatDate, formatEur } from "@/lib/payment-utils";
-import type { Payment, PaymentMethod } from "@/lib/types";
+import { METHOD_LABELS, METHOD_COLORS, MONTHS, formatDate, formatCurrency } from "@/lib/payment-utils";
+import { familyDisplayName } from "@/lib/family-utils";
+import type { Payment, PaymentMethod, Currency } from "@/lib/types";
 
-type PaymentWithFamily = Payment & { families: { name: string } | null };
+type PaymentWithFamily = Payment & { families: { name: string; father_name: string | null } | null };
 
 export default function PaymentsPage() {
   const { user } = useAuth();
@@ -16,6 +17,10 @@ export default function PaymentsPage() {
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
   const [filterMethod, setFilterMethod] = useState<string>("all");
+
+  // Bulk delete state
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     fetch("/api/payments")
@@ -29,8 +34,13 @@ export default function PaymentsPage() {
     if (!confirm("Delete this payment? This cannot be undone.")) return;
     setDeleting(id);
     const res = await fetch(`/api/payments/${id}`, { method: "DELETE" });
-    if (res.ok) setPayments((p) => p.filter((x) => x.id !== id));
-    else { const d = await res.json(); alert(d.error || "Failed to delete"); }
+    if (res.ok) {
+      setPayments((p) => p.filter((x) => x.id !== id));
+      setSelected((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    } else {
+      const d = await res.json();
+      alert(d.error || "Failed to delete");
+    }
     setDeleting(null);
   }
 
@@ -38,6 +48,55 @@ export default function PaymentsPage() {
   const total = filtered.reduce((s, p) => s + Number(p.amount), 0);
   const canAdd = user?.is_super_admin;
   const canDelete = user?.is_super_admin;
+
+  // Selection helpers
+  const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+  const selectedCount = selectedIds.length;
+  const allFilteredSelected = filtered.length > 0 && filtered.every((p) => selected[p.id]);
+  const someFilteredSelected = filtered.some((p) => selected[p.id]);
+
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someFilteredSelected && !allFilteredSelected;
+    }
+  }, [someFilteredSelected, allFilteredSelected]);
+
+  function toggleSelectAll() {
+    if (allFilteredSelected) {
+      setSelected({});
+    } else {
+      const next: Record<string, boolean> = {};
+      filtered.forEach((p) => { next[p.id] = true; });
+      setSelected(next);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  // Bulk delete
+  async function handleBulkDelete() {
+    if (!confirm(`Delete ${selectedCount} ${selectedCount === 1 ? "payment" : "payments"}? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    const ids = [...selectedIds];
+    let deleted = 0;
+    for (const id of ids) {
+      const res = await fetch(`/api/payments/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        deleted++;
+        setPayments((prev) => prev.filter((p) => p.id !== id));
+      }
+    }
+    setSelected({});
+    setBulkDeleting(false);
+    if (deleted < ids.length) {
+      alert(`Deleted ${deleted} of ${ids.length} payments. Some could not be deleted.`);
+    }
+  }
+
+  const colCount = canDelete ? 8 : 6;
 
   return (
     <div>
@@ -52,7 +111,16 @@ export default function PaymentsPage() {
             ))}
           </select>
           <span className="text-sm text-gray-500">{filtered.length} payments</span>
-          <span className="text-sm font-semibold text-gray-700">Total: {formatEur(total)}</span>
+          <span className="text-sm font-semibold text-gray-700">Total: {formatCurrency(total)}</span>
+          {canDelete && selectedCount > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium text-sm disabled:opacity-50"
+            >
+              {bulkDeleting ? "Deleting…" : `Delete ${selectedCount} selected`}
+            </button>
+          )}
           {canAdd && (
             <>
               <Link
@@ -76,6 +144,17 @@ export default function PaymentsPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  {canDelete && (
+                    <th className="px-4 py-3 w-10">
+                      <input
+                        ref={selectAllRef}
+                        type="checkbox"
+                        checked={allFilteredSelected}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                    </th>
+                  )}
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Date</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Family</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Method</th>
@@ -87,10 +166,20 @@ export default function PaymentsPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50">
+                  <tr key={p.id} className={`hover:bg-gray-50 ${selected[p.id] ? "bg-blue-50" : ""}`}>
+                    {canDelete && (
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={!!selected[p.id]}
+                          onChange={() => toggleSelect(p.id)}
+                          className="w-4 h-4 text-blue-600 rounded"
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(p.payment_date)}</td>
                     <td className="px-4 py-3 font-medium text-gray-900">
-                      <Link href={`/families/${p.family_id}`} className="hover:text-blue-600">{p.families?.name ?? "—"}</Link>
+                      <Link href={`/families/${p.family_id}`} className="hover:text-blue-600">{p.families ? familyDisplayName(p.families.name, p.families.father_name) : "—"}</Link>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${METHOD_COLORS[p.payment_method]}`}>
@@ -101,10 +190,10 @@ export default function PaymentsPage() {
                       {p.month && p.year ? `${MONTHS[p.month]} ${p.year}` : <span className="text-gray-400 italic">Unallocated</span>}
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{p.notes ?? "—"}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatEur(Number(p.amount))}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(Number(p.amount), (p.currency as Currency) ?? "EUR")}</td>
                     {canDelete && (
                       <td className="px-4 py-3 text-right">
-                        <button onClick={() => handleDelete(p.id)} disabled={deleting === p.id}
+                        <button onClick={() => handleDelete(p.id)} disabled={deleting === p.id || bulkDeleting}
                           className="text-red-500 hover:text-red-700 font-medium disabled:opacity-40">
                           {deleting === p.id ? "…" : "Delete"}
                         </button>
@@ -113,7 +202,7 @@ export default function PaymentsPage() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={canDelete ? 7 : 6} className="px-4 py-8 text-center text-gray-400">No payments found.</td></tr>
+                  <tr><td colSpan={colCount} className="px-4 py-8 text-center text-gray-400">No payments found.</td></tr>
                 )}
               </tbody>
             </table>

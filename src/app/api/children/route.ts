@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { generateChargesForChild, getCurrentBaseYear } from "@/lib/charge-utils";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   let query = db
     .from("children")
-    .select("*, families(name)")
+    .select("*, families(name, father_name)")
     .order("last_name");
   if (familyId) query = query.eq("family_id", familyId);
 
@@ -40,16 +41,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { family_id, first_name, last_name, monthly_tuition, class_name, date_of_birth, enrollment_date, notes } = body;
+  const {
+    family_id, first_name, last_name, monthly_tuition, class_name,
+    date_of_birth, enrollment_date, notes, currency,
+    enrollment_start_month, enrollment_start_year, enrollment_end_month, enrollment_end_year,
+  } = body;
   if (!family_id || !first_name?.trim() || !last_name?.trim())
     return NextResponse.json({ error: "family_id, first_name and last_name are required" }, { status: 400 });
 
   const db = createServerClient();
   const { data, error } = await db
     .from("children")
-    .insert({ family_id, first_name: first_name.trim(), last_name: last_name.trim(), monthly_tuition: monthly_tuition ?? 0, class_name, date_of_birth, enrollment_date, notes })
+    .insert({
+      family_id, first_name: first_name.trim(), last_name: last_name.trim(),
+      monthly_tuition: monthly_tuition ?? 0, currency: currency ?? "EUR",
+      class_name, date_of_birth, enrollment_date, notes,
+      enrollment_start_month: enrollment_start_month ?? null,
+      enrollment_start_year: enrollment_start_year ?? null,
+      enrollment_end_month: enrollment_end_month ?? null,
+      enrollment_end_year: enrollment_end_year ?? null,
+    })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Auto-generate charges for this child
+  if (data && Number(data.monthly_tuition) > 0) {
+    try {
+      const childCurrency = data.currency ?? "EUR";
+      const baseYear = getCurrentBaseYear();
+      await generateChargesForChild(
+        db, data.id, family_id, Number(data.monthly_tuition), childCurrency,
+        data.enrollment_start_month, data.enrollment_start_year,
+        data.enrollment_end_month, data.enrollment_end_year, baseYear
+      );
+    } catch { /* charge generation is best-effort */ }
+  }
+
   return NextResponse.json({ child: data }, { status: 201 });
 }

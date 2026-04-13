@@ -51,13 +51,15 @@ export async function POST(req: NextRequest) {
 
   const db = createServerClient();
 
-  // Load existing families for deduplication (case-insensitive by name)
+  // Load existing families for deduplication (by name + father_name)
   const { data: existingFamilies } = await db
     .from("families")
-    .select("id, name");
-  const existingMap = new Map<string, string>(); // lower-name → id
-  (existingFamilies ?? []).forEach((f: { id: string; name: string }) => {
-    existingMap.set(f.name.toLowerCase().trim(), f.id);
+    .select("id, name, father_name");
+  const existingMap = new Map<string, string>(); // match-key → id
+  (existingFamilies ?? []).forEach((f: { id: string; name: string; father_name: string | null }) => {
+    const fn = f.father_name?.toLowerCase().trim();
+    const key = fn ? `${f.name.toLowerCase().trim()}|${fn}` : f.name.toLowerCase().trim();
+    existingMap.set(key, f.id);
   });
 
   let createdFamilies = 0;
@@ -67,7 +69,8 @@ export async function POST(req: NextRequest) {
   const errors: Array<{ row: number; message: string }> = [];
 
   for (const importFamily of families) {
-    const nameKey = importFamily.name.toLowerCase().trim();
+    const fn = importFamily.father_name?.toLowerCase().trim();
+    const nameKey = fn ? `${importFamily.name.toLowerCase().trim()}|${fn}` : importFamily.name.toLowerCase().trim();
     const existingId = existingMap.get(nameKey);
 
     let familyId: string | null = null;

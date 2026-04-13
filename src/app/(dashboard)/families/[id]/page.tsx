@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, METHOD_COLORS, formatDate, formatEur } from "@/lib/payment-utils";
+import { METHOD_LABELS, METHOD_COLORS, CURRENCY_OPTIONS, formatDate, formatCurrency } from "@/lib/payment-utils";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
-import type { Family, Child, Payment, PaymentMethod } from "@/lib/types";
+import { familyDisplayName } from "@/lib/family-utils";
+import type { Family, Child, Payment, PaymentMethod, Currency } from "@/lib/types";
 
 interface FamilyData {
   family: Family;
@@ -26,8 +27,14 @@ function academicMonthOptions(baseYear: number) {
   });
 }
 
+function baseYearDefault() {
+  const now = new Date();
+  return now.getMonth() + 1 >= 9 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
 export default function FamilyDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { user } = useAuth();
   const [data, setData] = useState<FamilyData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,9 +47,25 @@ export default function FamilyDetailPage() {
 
   // Add child form
   const [showAddChild, setShowAddChild] = useState(false);
-  const [childForm, setChildForm] = useState({ first_name: "", last_name: "", monthly_tuition: "", class_name: "" });
+  const [childForm, setChildForm] = useState({
+    first_name: "", last_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
+    enrollment_start_month: "9", enrollment_start_year: String(baseYearDefault()),
+    enrollment_end_month: "8", enrollment_end_year: String(baseYearDefault() + 1),
+  });
   const [savingChild, setSavingChild] = useState(false);
   const [deletingChild, setDeletingChild] = useState<string | null>(null);
+
+  // Edit child state
+  const [editingChild, setEditingChild] = useState<string | null>(null);
+  const [editChildForm, setEditChildForm] = useState({
+    first_name: "", last_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
+    enrollment_start_month: "9", enrollment_start_year: "",
+    enrollment_end_month: "8", enrollment_end_year: "",
+  });
+  const [savingChildEdit, setSavingChildEdit] = useState(false);
+
+  // Delete family
+  const [deletingFamily, setDeletingFamily] = useState(false);
 
   // Add payment form
   const [showAddPayment, setShowAddPayment] = useState(false);
@@ -98,11 +121,25 @@ export default function FamilyDetailPage() {
     setSavingChild(true);
     const res = await fetch("/api/children", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ family_id: id, ...childForm, monthly_tuition: Number(childForm.monthly_tuition) || 0 }),
+      body: JSON.stringify({
+        family_id: id,
+        first_name: childForm.first_name, last_name: childForm.last_name,
+        monthly_tuition: Number(childForm.monthly_tuition) || 0,
+        currency: childForm.currency || "EUR",
+        class_name: childForm.class_name || null,
+        enrollment_start_month: Number(childForm.enrollment_start_month) || 9,
+        enrollment_start_year: Number(childForm.enrollment_start_year) || null,
+        enrollment_end_month: Number(childForm.enrollment_end_month) || 8,
+        enrollment_end_year: Number(childForm.enrollment_end_year) || null,
+      }),
     });
     if (res.ok) {
       await loadFamily();
-      setChildForm({ first_name: "", last_name: "", monthly_tuition: "", class_name: "" });
+      setChildForm({
+        first_name: "", last_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
+        enrollment_start_month: "9", enrollment_start_year: String(baseYearDefault()),
+        enrollment_end_month: "8", enrollment_end_year: String(baseYearDefault() + 1),
+      });
       setShowAddChild(false);
     } else { const d = await res.json(); alert(d.error || "Failed to add child"); }
     setSavingChild(false);
@@ -115,6 +152,64 @@ export default function FamilyDetailPage() {
     if (res.ok) setData((prev) => prev ? { ...prev, children: prev.children.filter((c) => c.id !== childId) } : prev);
     else { const d = await res.json(); alert(d.error || "Failed to delete"); }
     setDeletingChild(null);
+  }
+
+  function startEditChild(c: Child) {
+    setEditingChild(c.id);
+    setEditChildForm({
+      first_name: c.first_name,
+      last_name: c.last_name,
+      monthly_tuition: String(c.monthly_tuition),
+      class_name: c.class_name ?? "",
+      currency: c.currency ?? "EUR",
+      enrollment_start_month: String(c.enrollment_start_month ?? 9),
+      enrollment_start_year: String(c.enrollment_start_year ?? baseYearDefault()),
+      enrollment_end_month: String(c.enrollment_end_month ?? 8),
+      enrollment_end_year: String(c.enrollment_end_year ?? baseYearDefault() + 1),
+    });
+  }
+
+  async function handleSaveChild(childId: string) {
+    setSavingChildEdit(true);
+    const res = await fetch(`/api/children/${childId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        first_name: editChildForm.first_name,
+        last_name: editChildForm.last_name,
+        monthly_tuition: Number(editChildForm.monthly_tuition) || 0,
+        currency: editChildForm.currency || "EUR",
+        class_name: editChildForm.class_name || null,
+        enrollment_start_month: Number(editChildForm.enrollment_start_month) || 9,
+        enrollment_start_year: Number(editChildForm.enrollment_start_year) || null,
+        enrollment_end_month: Number(editChildForm.enrollment_end_month) || 8,
+        enrollment_end_year: Number(editChildForm.enrollment_end_year) || null,
+      }),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      setData((prev) =>
+        prev ? { ...prev, children: prev.children.map((c) => (c.id === childId ? d.child : c)) } : prev
+      );
+      setEditingChild(null);
+    } else {
+      const d = await res.json();
+      alert(d.error || "Failed to save");
+    }
+    setSavingChildEdit(false);
+  }
+
+  async function handleDeleteFamily() {
+    if (!confirm(`Delete family "${data?.family.name}"? This cannot be undone.`)) return;
+    setDeletingFamily(true);
+    const res = await fetch(`/api/families/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      router.push("/families");
+    } else {
+      const d = await res.json();
+      alert(d.error || "Failed to delete family");
+      setDeletingFamily(false);
+    }
   }
 
   async function handleAddPayment(e: React.FormEvent) {
@@ -176,7 +271,7 @@ export default function FamilyDetailPage() {
           ].map(({ label, value, color }) => (
             <div key={label} className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
               <p className="text-xs text-gray-500 mb-1">{label}</p>
-              <p className={`text-2xl font-bold ${color}`}>{formatEur(value)}</p>
+              <p className={`text-2xl font-bold ${color}`}>{formatCurrency(value)}</p>
             </div>
           ))}
         </div>
@@ -184,9 +279,15 @@ export default function FamilyDetailPage() {
         {/* Family info */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">{family.name}</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{familyDisplayName(family.name, family.father_name)}</h2>
             {canEdit && !editMode && (
-              <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+              <div className="flex gap-3 items-center">
+                <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+                <button onClick={handleDeleteFamily} disabled={deletingFamily}
+                  className="text-sm text-red-500 hover:text-red-700 disabled:opacity-40">
+                  {deletingFamily ? "Deleting…" : "Delete Family"}
+                </button>
+              </div>
             )}
           </div>
 
@@ -260,15 +361,53 @@ export default function FamilyDetailPage() {
                     className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Monthly Tuition (€)</label>
-                  <input type="number" value={childForm.monthly_tuition} onChange={(e) => setChildForm((p) => ({ ...p, monthly_tuition: e.target.value }))}
-                    min="0" step="0.01" placeholder="0.00"
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Monthly Tuition</label>
+                  <div className="flex gap-1">
+                    <select value={childForm.currency} onChange={(e) => setChildForm((p) => ({ ...p, currency: e.target.value }))}
+                      className="w-20 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {CURRENCY_OPTIONS.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label.split(" ")[0]}</option>
+                      ))}
+                    </select>
+                    <input type="number" value={childForm.monthly_tuition} onChange={(e) => setChildForm((p) => ({ ...p, monthly_tuition: e.target.value }))}
+                      min="0" step="0.01" placeholder="0.00"
+                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Class</label>
                   <input type="text" value={childForm.class_name} onChange={(e) => setChildForm((p) => ({ ...p, class_name: e.target.value }))}
                     className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment Start</label>
+                  <div className="flex gap-1">
+                    <select value={childForm.enrollment_start_month} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_start_month: e.target.value }))}
+                      className="flex-1 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {monthOptions.map(({ month, label }) => (
+                        <option key={month} value={month}>{label.split(" ")[0]}</option>
+                      ))}
+                    </select>
+                    <input type="number" value={childForm.enrollment_start_year} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_start_year: e.target.value }))}
+                      className="w-20 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Year" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment End</label>
+                  <div className="flex gap-1">
+                    <select value={childForm.enrollment_end_month} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_end_month: e.target.value }))}
+                      className="flex-1 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {monthOptions.map(({ month, label }) => (
+                        <option key={month} value={month}>{label.split(" ")[0]}</option>
+                      ))}
+                    </select>
+                    <input type="number" value={childForm.enrollment_end_year} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_end_year: e.target.value }))}
+                      className="w-20 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Year" />
+                  </div>
                 </div>
               </div>
               <button type="submit" disabled={savingChild}
@@ -294,20 +433,68 @@ export default function FamilyDetailPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {children.map((c) => (
-                  <tr key={c.id} className="hover:bg-gray-50">
-                    <td className="py-2 font-medium text-gray-900">{c.first_name} {c.last_name}</td>
-                    <td className="py-2 text-gray-600">{c.class_name ?? "—"}</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatEur(Number(c.monthly_tuition))}</td>
-                    {canEdit && (
-                      <td className="py-2 text-right">
-                        <button onClick={() => handleDeleteChild(c.id, `${c.first_name} ${c.last_name}`)}
-                          disabled={deletingChild === c.id}
-                          className="text-red-500 hover:text-red-700 text-xs disabled:opacity-40">
-                          {deletingChild === c.id ? "…" : "Remove"}
-                        </button>
+                  editingChild === c.id ? (
+                    <tr key={c.id} className="bg-blue-50">
+                      <td className="py-2">
+                        <div className="flex gap-1">
+                          <input type="text" value={editChildForm.first_name}
+                            onChange={(e) => setEditChildForm((p) => ({ ...p, first_name: e.target.value }))}
+                            className="w-1/2 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="First" />
+                          <input type="text" value={editChildForm.last_name}
+                            onChange={(e) => setEditChildForm((p) => ({ ...p, last_name: e.target.value }))}
+                            className="w-1/2 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Last" />
+                        </div>
                       </td>
-                    )}
-                  </tr>
+                      <td className="py-2">
+                        <input type="text" value={editChildForm.class_name}
+                          onChange={(e) => setEditChildForm((p) => ({ ...p, class_name: e.target.value }))}
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Class" />
+                      </td>
+                      <td className="py-2">
+                        <input type="number" value={editChildForm.monthly_tuition}
+                          onChange={(e) => setEditChildForm((p) => ({ ...p, monthly_tuition: e.target.value }))}
+                          min="0" step="0.01"
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="0.00" />
+                      </td>
+                      <td className="py-2 text-right">
+                        <div className="flex gap-1 justify-end">
+                          <button onClick={() => handleSaveChild(c.id)} disabled={savingChildEdit}
+                            className="text-green-600 hover:text-green-800 text-xs font-medium disabled:opacity-40">
+                            {savingChildEdit ? "…" : "Save"}
+                          </button>
+                          <button onClick={() => setEditingChild(null)}
+                            className="text-gray-500 hover:text-gray-700 text-xs">
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={c.id} className="hover:bg-gray-50">
+                      <td className="py-2 font-medium text-gray-900">{c.first_name} {c.last_name}</td>
+                      <td className="py-2 text-gray-600">{c.class_name ?? "—"}</td>
+                      <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(Number(c.monthly_tuition), (c.currency as Currency) ?? "EUR")}</td>
+                      {canEdit && (
+                        <td className="py-2 text-right">
+                          <div className="flex gap-2 justify-end">
+                            <button onClick={() => startEditChild(c)}
+                              className="text-blue-500 hover:text-blue-700 text-xs font-medium">
+                              Edit
+                            </button>
+                            <button onClick={() => handleDeleteChild(c.id, `${c.first_name} ${c.last_name}`)}
+                              disabled={deletingChild === c.id}
+                              className="text-red-500 hover:text-red-700 text-xs disabled:opacity-40">
+                              {deletingChild === c.id ? "…" : "Remove"}
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  )
                 ))}
               </tbody>
             </table>
@@ -329,7 +516,7 @@ export default function FamilyDetailPage() {
             <form onSubmit={handleAddPayment} className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount (€) *</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount *</label>
                   <input type="number" value={payForm.amount} onChange={(e) => setPayForm((p) => ({ ...p, amount: e.target.value }))}
                     min="0.01" step="0.01" required placeholder="0.00"
                     className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -422,7 +609,7 @@ export default function FamilyDetailPage() {
                       {p.month && p.year ? hebrewMonthLabel(p.month, p.year) : <span className="text-gray-400 italic text-xs">Unallocated</span>}
                     </td>
                     <td className="py-2 text-gray-500 text-xs max-w-xs truncate">{p.notes ?? "—"}</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatEur(Number(p.amount))}</td>
+                    <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(Number(p.amount), (p.currency as Currency) ?? "EUR")}</td>
                     {canEdit && (
                       <td className="py-2 text-right">
                         <button onClick={() => handleDeletePayment(p.id)} disabled={deletingPayment === p.id}

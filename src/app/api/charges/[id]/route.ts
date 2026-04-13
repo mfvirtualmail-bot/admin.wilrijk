@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { regenerateChargesForChild, getCurrentBaseYear } from "@/lib/charge-utils";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -15,50 +14,30 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const perms = await getUserPermissions(user.id);
-  if (!user.is_super_admin && !perms["children"]?.includes("edit"))
+  if (!user.is_super_admin && !perms["charges"]?.includes("edit"))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const db = createServerClient();
-
-  // Check if tuition or enrollment changed (need old values to compare)
-  const tuitionOrEnrollmentChanged = "monthly_tuition" in body
-    || "enrollment_start_month" in body || "enrollment_start_year" in body
-    || "enrollment_end_month" in body || "enrollment_end_year" in body;
-
   const { data, error } = await db
-    .from("children")
+    .from("charges")
     .update({ ...body, updated_at: new Date().toISOString() })
     .eq("id", params.id)
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Auto-regenerate charges if tuition or enrollment period changed
-  if (data && tuitionOrEnrollmentChanged) {
-    try {
-      const childCurrency = data.currency ?? "EUR";
-      const baseYear = getCurrentBaseYear();
-      await regenerateChargesForChild(
-        db, data.id, data.family_id, Number(data.monthly_tuition), childCurrency,
-        data.enrollment_start_month, data.enrollment_start_year,
-        data.enrollment_end_month, data.enrollment_end_year, baseYear
-      );
-    } catch { /* charge regeneration is best-effort */ }
-  }
-
-  return NextResponse.json({ child: data });
+  return NextResponse.json({ charge: data });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const perms = await getUserPermissions(user.id);
-  if (!user.is_super_admin && !perms["children"]?.includes("delete"))
+  if (!user.is_super_admin && !perms["charges"]?.includes("delete"))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const db = createServerClient();
-  const { error } = await db.from("children").delete().eq("id", params.id);
+  const { error } = await db.from("charges").delete().eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
