@@ -11,10 +11,15 @@ export async function GET() {
 
   const db = createServerClient();
 
-  const [familiesRes, childrenRes, paymentsRes, chargesRes, recentPaymentsRes] = await Promise.all([
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+
+  const [familiesRes, childrenRes, paymentsRes, chargesAllRes, monthlyRes, recentPaymentsRes] = await Promise.all([
     db.from("families").select("id", { count: "exact" }).eq("is_active", true),
     db.from("children").select("id", { count: "exact" }).eq("is_active", true),
     db.from("payments").select("amount"),
+    db.from("charges").select("amount, month, year"),
     db.from("children").select("monthly_tuition").eq("is_active", true),
     db.from("payments")
       .select("id, amount, payment_date, payment_method, currency, families(name, father_name)")
@@ -23,9 +28,12 @@ export async function GET() {
   ]);
 
   const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
-  const monthlyTuitionTotal = (chargesRes.data ?? []).reduce((s, c) => s + Number(c.monthly_tuition), 0);
-  // Academic months Sep → Aug = 12 months (אלול → אב)
-  const totalCharged = monthlyTuitionTotal * 12;
+  const monthlyTuitionTotal = (monthlyRes.data ?? []).reduce((s, c) => s + Number(c.monthly_tuition), 0);
+  // Only count charges up to and including the current month
+  const currentMonthKey = currentYear * 100 + currentMonth;
+  const totalCharged = (chargesAllRes.data ?? [])
+    .filter((c) => Number(c.year) * 100 + Number(c.month) <= currentMonthKey)
+    .reduce((s, c) => s + Number(c.amount), 0);
   const totalDue = Math.max(0, totalCharged - totalPaid);
 
   return NextResponse.json({

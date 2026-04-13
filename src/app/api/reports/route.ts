@@ -54,11 +54,17 @@ export async function GET() {
 
   const totalMonthlyExpected = Object.values(tuitionByFamily).reduce((s, v) => s + v, 0);
 
+  // Only count months up to and including the current month for charged totals
+  const now = new Date();
+  const currentMonthKey = now.getFullYear() * 100 + (now.getMonth() + 1);
+  const monthsUpToNow = months.filter(({ month, year }) => year * 100 + month <= currentMonthKey);
+
   // --- Monthly breakdown ---
   const monthlyStats = months.map(({ month, year }) => {
     const monthPayments = payments.filter((p) => p.month === month && p.year === year);
     const collected = monthPayments.reduce((s, p) => s + Number(p.amount), 0);
-    const expected = totalMonthlyExpected;
+    const isFuture = year * 100 + month > currentMonthKey;
+    const expected = isFuture ? 0 : totalMonthlyExpected;
     return {
       month,
       year,
@@ -88,7 +94,7 @@ export async function GET() {
   const outstandingFamilies = families
     .map((f) => {
       const tuition = tuitionByFamily[f.id] ?? 0;
-      const charged = tuition * months.length;
+      const charged = tuition * monthsUpToNow.length;
       const paid = paymentsByFamily[f.id] ?? 0;
       const due = charged - paid;
       return { id: f.id, name: f.father_name ? `${f.name} (${f.father_name})` : f.name, charged, paid, due };
@@ -97,7 +103,7 @@ export async function GET() {
     .sort((a, b) => b.due - a.due);
 
   // --- Summary totals ---
-  const totalCharged = totalMonthlyExpected * months.length;
+  const totalCharged = totalMonthlyExpected * monthsUpToNow.length;
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
   const totalDue = Math.max(0, totalCharged - totalPaid);
 

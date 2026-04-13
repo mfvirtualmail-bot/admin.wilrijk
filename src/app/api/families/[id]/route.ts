@@ -28,7 +28,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (familyRes.error || !familyRes.data)
     return NextResponse.json({ error: "Family not found" }, { status: 404 });
 
-  const totalCharged = (chargesRes.data ?? []).reduce((s, c) => s + Number(c.amount), 0);
+  // Only count charges up to and including the current month in the balance
+  const now = new Date();
+  const currentMonthKey = now.getFullYear() * 100 + (now.getMonth() + 1);
+  const chargesUpToNow = (chargesRes.data ?? []).filter((c) => {
+    const chargeKey = Number(c.year) * 100 + Number(c.month);
+    return chargeKey <= currentMonthKey;
+  });
+
+  const totalCharged = chargesUpToNow.reduce((s, c) => s + Number(c.amount), 0);
   const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
 
   return NextResponse.json({

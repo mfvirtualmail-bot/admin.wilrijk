@@ -39,6 +39,8 @@ export async function GET() {
 
   const db = createServerClient();
   const academicYear = getAcademicYear();
+  const now = new Date();
+  const currentMonthKey = now.getFullYear() * 100 + (now.getMonth() + 1);
 
   // Build month+year combos for this academic year
   const months = ACADEMIC_MONTHS.map((m) => monthYear(academicYear, m.month));
@@ -108,7 +110,9 @@ export async function GET() {
         monthData[monthKey] = { paymentId: null, date: null, method: null, amount: null, notes: null };
       }
 
-      if (monthlyTuition > 0) totalCharged += monthlyTuition;
+      // Only count charges for months up to and including current month
+      const chargeMonthKey = year * 100 + month;
+      if (monthlyTuition > 0 && chargeMonthKey <= currentMonthKey) totalCharged += monthlyTuition;
     }
 
     return {

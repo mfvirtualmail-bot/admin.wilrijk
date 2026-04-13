@@ -50,7 +50,7 @@ export default function FamilyDetailPage() {
   const [childForm, setChildForm] = useState({
     first_name: "", last_name: "", hebrew_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
     enrollment_start_month: "9", enrollment_start_year: String(baseYearDefault()),
-    enrollment_end_month: "8", enrollment_end_year: String(baseYearDefault() + 1),
+    enrollment_end_month: "", enrollment_end_year: "",
   });
   const [savingChild, setSavingChild] = useState(false);
   const [deletingChild, setDeletingChild] = useState<string | null>(null);
@@ -130,8 +130,8 @@ export default function FamilyDetailPage() {
         class_name: childForm.class_name || null,
         enrollment_start_month: Number(childForm.enrollment_start_month) || 9,
         enrollment_start_year: Number(childForm.enrollment_start_year) || null,
-        enrollment_end_month: Number(childForm.enrollment_end_month) || 8,
-        enrollment_end_year: Number(childForm.enrollment_end_year) || null,
+        enrollment_end_month: childForm.enrollment_end_month ? Number(childForm.enrollment_end_month) : null,
+        enrollment_end_year: childForm.enrollment_end_year ? Number(childForm.enrollment_end_year) : null,
       }),
     });
     if (res.ok) {
@@ -139,7 +139,7 @@ export default function FamilyDetailPage() {
       setChildForm({
         first_name: "", last_name: "", hebrew_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
         enrollment_start_month: "9", enrollment_start_year: String(baseYearDefault()),
-        enrollment_end_month: "8", enrollment_end_year: String(baseYearDefault() + 1),
+        enrollment_end_month: "", enrollment_end_year: "",
       });
       setShowAddChild(false);
     } else { const d = await res.json(); alert(d.error || "Failed to add child"); }
@@ -166,8 +166,8 @@ export default function FamilyDetailPage() {
       currency: c.currency ?? "EUR",
       enrollment_start_month: String(c.enrollment_start_month ?? 9),
       enrollment_start_year: String(c.enrollment_start_year ?? baseYearDefault()),
-      enrollment_end_month: String(c.enrollment_end_month ?? 8),
-      enrollment_end_year: String(c.enrollment_end_year ?? baseYearDefault() + 1),
+      enrollment_end_month: c.enrollment_end_month != null ? String(c.enrollment_end_month) : "",
+      enrollment_end_year: c.enrollment_end_year != null ? String(c.enrollment_end_year) : "",
     });
   }
 
@@ -185,8 +185,8 @@ export default function FamilyDetailPage() {
         class_name: editChildForm.class_name || null,
         enrollment_start_month: Number(editChildForm.enrollment_start_month) || 9,
         enrollment_start_year: Number(editChildForm.enrollment_start_year) || null,
-        enrollment_end_month: Number(editChildForm.enrollment_end_month) || 8,
-        enrollment_end_year: Number(editChildForm.enrollment_end_year) || null,
+        enrollment_end_month: editChildForm.enrollment_end_month ? Number(editChildForm.enrollment_end_month) : null,
+        enrollment_end_year: editChildForm.enrollment_end_year ? Number(editChildForm.enrollment_end_year) : null,
       }),
     });
     if (res.ok) {
@@ -409,12 +409,17 @@ export default function FamilyDetailPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment End</label>
                   <select
-                    value={`${childForm.enrollment_end_month}:${childForm.enrollment_end_year}`}
+                    value={childForm.enrollment_end_month && childForm.enrollment_end_year ? `${childForm.enrollment_end_month}:${childForm.enrollment_end_year}` : ""}
                     onChange={(e) => {
-                      const [m, y] = e.target.value.split(":");
-                      setChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
+                      if (!e.target.value) {
+                        setChildForm((p) => ({ ...p, enrollment_end_month: "", enrollment_end_year: "" }));
+                      } else {
+                        const [m, y] = e.target.value.split(":");
+                        setChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
+                      }
                     }}
                     className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
+                    <option value="">— Ongoing —</option>
                     {monthOptions.map(({ month, year, label }) => (
                       <option key={`${month}:${year}`} value={`${month}:${year}`}>{label}</option>
                     ))}
@@ -470,11 +475,19 @@ export default function FamilyDetailPage() {
                           placeholder="Class" />
                       </td>
                       <td className="py-2">
-                        <input type="number" value={editChildForm.monthly_tuition}
-                          onChange={(e) => setEditChildForm((p) => ({ ...p, monthly_tuition: e.target.value }))}
-                          min="0" step="0.01"
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="0.00" />
+                        <div className="flex gap-1">
+                          <select value={editChildForm.currency} onChange={(e) => setEditChildForm((p) => ({ ...p, currency: e.target.value }))}
+                            className="w-14 px-1 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            {CURRENCY_OPTIONS.map((c) => (
+                              <option key={c.value} value={c.value}>{c.label.split(" ")[0]}</option>
+                            ))}
+                          </select>
+                          <input type="number" value={editChildForm.monthly_tuition}
+                            onChange={(e) => setEditChildForm((p) => ({ ...p, monthly_tuition: e.target.value }))}
+                            min="0" step="0.01"
+                            className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="0.00" />
+                        </div>
                       </td>
                       <td className="py-2" dir="rtl">
                         <div className="flex flex-col gap-1">
@@ -490,12 +503,17 @@ export default function FamilyDetailPage() {
                             ))}
                           </select>
                           <select
-                            value={`${editChildForm.enrollment_end_month}:${editChildForm.enrollment_end_year}`}
+                            value={editChildForm.enrollment_end_month && editChildForm.enrollment_end_year ? `${editChildForm.enrollment_end_month}:${editChildForm.enrollment_end_year}` : ""}
                             onChange={(e) => {
-                              const [m, y] = e.target.value.split(":");
-                              setEditChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
+                              if (!e.target.value) {
+                                setEditChildForm((p) => ({ ...p, enrollment_end_month: "", enrollment_end_year: "" }));
+                              } else {
+                                const [m, y] = e.target.value.split(":");
+                                setEditChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
+                              }
                             }}
                             className="w-full px-1 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
+                            <option value="">— Ongoing —</option>
                             {monthOptions.map(({ month, year, label }) => (
                               <option key={`e${month}:${year}`} value={`${month}:${year}`}>{label}</option>
                             ))}
@@ -526,7 +544,9 @@ export default function FamilyDetailPage() {
                       <td className="py-2 text-right text-xs text-gray-500" dir="rtl">
                         {hebrewMonthLabel(c.enrollment_start_month ?? 9, c.enrollment_start_year ?? baseYear)}
                         {" — "}
-                        {hebrewMonthLabel(c.enrollment_end_month ?? 8, c.enrollment_end_year ?? baseYear + 1)}
+                        {c.enrollment_end_month != null && c.enrollment_end_year != null
+                          ? hebrewMonthLabel(c.enrollment_end_month, c.enrollment_end_year)
+                          : "Ongoing"}
                       </td>
                       {canEdit && (
                         <td className="py-2 text-right">
