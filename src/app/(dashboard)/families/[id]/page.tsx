@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
@@ -28,6 +28,7 @@ function academicMonthOptions(baseYear: number) {
 
 export default function FamilyDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { user } = useAuth();
   const [data, setData] = useState<FamilyData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +44,14 @@ export default function FamilyDetailPage() {
   const [childForm, setChildForm] = useState({ first_name: "", last_name: "", monthly_tuition: "", class_name: "" });
   const [savingChild, setSavingChild] = useState(false);
   const [deletingChild, setDeletingChild] = useState<string | null>(null);
+
+  // Edit child state
+  const [editingChild, setEditingChild] = useState<string | null>(null);
+  const [editChildForm, setEditChildForm] = useState({ first_name: "", last_name: "", monthly_tuition: "", class_name: "" });
+  const [savingChildEdit, setSavingChildEdit] = useState(false);
+
+  // Delete family
+  const [deletingFamily, setDeletingFamily] = useState(false);
 
   // Add payment form
   const [showAddPayment, setShowAddPayment] = useState(false);
@@ -117,6 +126,54 @@ export default function FamilyDetailPage() {
     setDeletingChild(null);
   }
 
+  function startEditChild(c: Child) {
+    setEditingChild(c.id);
+    setEditChildForm({
+      first_name: c.first_name,
+      last_name: c.last_name,
+      monthly_tuition: String(c.monthly_tuition),
+      class_name: c.class_name ?? "",
+    });
+  }
+
+  async function handleSaveChild(childId: string) {
+    setSavingChildEdit(true);
+    const res = await fetch(`/api/children/${childId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        first_name: editChildForm.first_name,
+        last_name: editChildForm.last_name,
+        monthly_tuition: Number(editChildForm.monthly_tuition) || 0,
+        class_name: editChildForm.class_name || null,
+      }),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      setData((prev) =>
+        prev ? { ...prev, children: prev.children.map((c) => (c.id === childId ? d.child : c)) } : prev
+      );
+      setEditingChild(null);
+    } else {
+      const d = await res.json();
+      alert(d.error || "Failed to save");
+    }
+    setSavingChildEdit(false);
+  }
+
+  async function handleDeleteFamily() {
+    if (!confirm(`Delete family "${data?.family.name}"? This cannot be undone.`)) return;
+    setDeletingFamily(true);
+    const res = await fetch(`/api/families/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      router.push("/families");
+    } else {
+      const d = await res.json();
+      alert(d.error || "Failed to delete family");
+      setDeletingFamily(false);
+    }
+  }
+
   async function handleAddPayment(e: React.FormEvent) {
     e.preventDefault();
     setSavingPayment(true);
@@ -186,7 +243,13 @@ export default function FamilyDetailPage() {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold text-gray-900">{family.name}</h2>
             {canEdit && !editMode && (
-              <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+              <div className="flex gap-3 items-center">
+                <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+                <button onClick={handleDeleteFamily} disabled={deletingFamily}
+                  className="text-sm text-red-500 hover:text-red-700 disabled:opacity-40">
+                  {deletingFamily ? "Deleting…" : "Delete Family"}
+                </button>
+              </div>
             )}
           </div>
 
@@ -294,20 +357,68 @@ export default function FamilyDetailPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {children.map((c) => (
-                  <tr key={c.id} className="hover:bg-gray-50">
-                    <td className="py-2 font-medium text-gray-900">{c.first_name} {c.last_name}</td>
-                    <td className="py-2 text-gray-600">{c.class_name ?? "—"}</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatEur(Number(c.monthly_tuition))}</td>
-                    {canEdit && (
-                      <td className="py-2 text-right">
-                        <button onClick={() => handleDeleteChild(c.id, `${c.first_name} ${c.last_name}`)}
-                          disabled={deletingChild === c.id}
-                          className="text-red-500 hover:text-red-700 text-xs disabled:opacity-40">
-                          {deletingChild === c.id ? "…" : "Remove"}
-                        </button>
+                  editingChild === c.id ? (
+                    <tr key={c.id} className="bg-blue-50">
+                      <td className="py-2">
+                        <div className="flex gap-1">
+                          <input type="text" value={editChildForm.first_name}
+                            onChange={(e) => setEditChildForm((p) => ({ ...p, first_name: e.target.value }))}
+                            className="w-1/2 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="First" />
+                          <input type="text" value={editChildForm.last_name}
+                            onChange={(e) => setEditChildForm((p) => ({ ...p, last_name: e.target.value }))}
+                            className="w-1/2 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Last" />
+                        </div>
                       </td>
-                    )}
-                  </tr>
+                      <td className="py-2">
+                        <input type="text" value={editChildForm.class_name}
+                          onChange={(e) => setEditChildForm((p) => ({ ...p, class_name: e.target.value }))}
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Class" />
+                      </td>
+                      <td className="py-2">
+                        <input type="number" value={editChildForm.monthly_tuition}
+                          onChange={(e) => setEditChildForm((p) => ({ ...p, monthly_tuition: e.target.value }))}
+                          min="0" step="0.01"
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="0.00" />
+                      </td>
+                      <td className="py-2 text-right">
+                        <div className="flex gap-1 justify-end">
+                          <button onClick={() => handleSaveChild(c.id)} disabled={savingChildEdit}
+                            className="text-green-600 hover:text-green-800 text-xs font-medium disabled:opacity-40">
+                            {savingChildEdit ? "…" : "Save"}
+                          </button>
+                          <button onClick={() => setEditingChild(null)}
+                            className="text-gray-500 hover:text-gray-700 text-xs">
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={c.id} className="hover:bg-gray-50">
+                      <td className="py-2 font-medium text-gray-900">{c.first_name} {c.last_name}</td>
+                      <td className="py-2 text-gray-600">{c.class_name ?? "—"}</td>
+                      <td className="py-2 text-right font-semibold text-gray-900">{formatEur(Number(c.monthly_tuition))}</td>
+                      {canEdit && (
+                        <td className="py-2 text-right">
+                          <div className="flex gap-2 justify-end">
+                            <button onClick={() => startEditChild(c)}
+                              className="text-blue-500 hover:text-blue-700 text-xs font-medium">
+                              Edit
+                            </button>
+                            <button onClick={() => handleDeleteChild(c.id, `${c.first_name} ${c.last_name}`)}
+                              disabled={deletingChild === c.id}
+                              className="text-red-500 hover:text-red-700 text-xs disabled:opacity-40">
+                              {deletingChild === c.id ? "…" : "Remove"}
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  )
                 ))}
               </tbody>
             </table>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
@@ -12,6 +12,11 @@ export default function FamiliesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+
+  // Delete state
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     fetch("/api/families")
@@ -35,7 +40,71 @@ export default function FamiliesPage() {
     );
   });
 
-  const canEdit = user?.is_super_admin;
+  const canDelete = user?.is_super_admin;
+
+  // Selection helpers
+  const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+  const selectedCount = selectedIds.length;
+  const allFilteredSelected = filtered.length > 0 && filtered.every((f) => selected[f.id]);
+  const someFilteredSelected = filtered.some((f) => selected[f.id]);
+
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someFilteredSelected && !allFilteredSelected;
+    }
+  }, [someFilteredSelected, allFilteredSelected]);
+
+  function toggleSelectAll() {
+    if (allFilteredSelected) {
+      setSelected({});
+    } else {
+      const next: Record<string, boolean> = {};
+      filtered.forEach((f) => { next[f.id] = true; });
+      setSelected(next);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  // Single delete
+  const handleDelete = useCallback(async (id: string, name: string) => {
+    if (!confirm(`Delete family "${name}"? This cannot be undone.`)) return;
+    setDeleting(id);
+    const res = await fetch(`/api/families/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      setFamilies((prev) => prev.filter((f) => f.id !== id));
+      setSelected((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    } else {
+      const d = await res.json();
+      alert(d.error || "Failed to delete");
+    }
+    setDeleting(null);
+  }, []);
+
+  // Bulk delete
+  async function handleBulkDelete() {
+    if (!confirm(`Delete ${selectedCount} ${selectedCount === 1 ? "family" : "families"}? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    const ids = [...selectedIds];
+    let deleted = 0;
+    for (const id of ids) {
+      const res = await fetch(`/api/families/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        deleted++;
+        setFamilies((prev) => prev.filter((f) => f.id !== id));
+      }
+    }
+    setSelected({});
+    setBulkDeleting(false);
+    if (deleted < ids.length) {
+      alert(`Deleted ${deleted} of ${ids.length} families. Some could not be deleted.`);
+    }
+  }
+
+  const colCount = canDelete ? 8 : 6;
 
   return (
     <div>
@@ -51,7 +120,16 @@ export default function FamiliesPage() {
             className="flex-1 max-w-sm px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <span className="text-sm text-gray-500">{filtered.length} families</span>
-          {canEdit && (
+          {canDelete && selectedCount > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-medium text-sm disabled:opacity-50"
+            >
+              {bulkDeleting ? "Deleting…" : `Delete ${selectedCount} selected`}
+            </button>
+          )}
+          {canDelete && (
             <>
               <Link
                 href="/families/import"
@@ -79,17 +157,41 @@ export default function FamiliesPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  {canDelete && (
+                    <th className="px-4 py-3 w-10">
+                      <input
+                        ref={selectAllRef}
+                        type="checkbox"
+                        checked={allFilteredSelected}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                    </th>
+                  )}
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Family Name</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Father</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">City</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Phone</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Email</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Status</th>
+                  {canDelete && (
+                    <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((f) => (
-                  <tr key={f.id} className="hover:bg-gray-50">
+                  <tr key={f.id} className={`hover:bg-gray-50 ${selected[f.id] ? "bg-blue-50" : ""}`}>
+                    {canDelete && (
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={!!selected[f.id]}
+                          onChange={() => toggleSelect(f.id)}
+                          className="w-4 h-4 text-blue-600 rounded"
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <Link
                         href={`/families/${f.id}`}
@@ -113,11 +215,22 @@ export default function FamiliesPage() {
                         {f.is_active ? "Active" : "Inactive"}
                       </span>
                     </td>
+                    {canDelete && (
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => handleDelete(f.id, f.name)}
+                          disabled={deleting === f.id || bulkDeleting}
+                          className="text-red-500 hover:text-red-700 font-medium text-sm disabled:opacity-40"
+                        >
+                          {deleting === f.id ? "…" : "Delete"}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-gray-400">
+                    <td colSpan={colCount} className="px-4 py-10 text-center text-gray-400">
                       {search
                         ? "No families match your search."
                         : "No families yet. Click \"+ Add Family\" or import from Excel to get started."}
