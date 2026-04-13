@@ -48,7 +48,7 @@ export default function FamilyDetailPage() {
   // Add child form
   const [showAddChild, setShowAddChild] = useState(false);
   const [childForm, setChildForm] = useState({
-    first_name: "", last_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
+    first_name: "", last_name: "", hebrew_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
     enrollment_start_month: "9", enrollment_start_year: String(baseYearDefault()),
     enrollment_end_month: "8", enrollment_end_year: String(baseYearDefault() + 1),
   });
@@ -58,7 +58,7 @@ export default function FamilyDetailPage() {
   // Edit child state
   const [editingChild, setEditingChild] = useState<string | null>(null);
   const [editChildForm, setEditChildForm] = useState({
-    first_name: "", last_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
+    first_name: "", last_name: "", hebrew_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
     enrollment_start_month: "9", enrollment_start_year: "",
     enrollment_end_month: "8", enrollment_end_year: "",
   });
@@ -124,6 +124,7 @@ export default function FamilyDetailPage() {
       body: JSON.stringify({
         family_id: id,
         first_name: childForm.first_name, last_name: childForm.last_name,
+        hebrew_name: childForm.hebrew_name.trim() || null,
         monthly_tuition: Number(childForm.monthly_tuition) || 0,
         currency: childForm.currency || "EUR",
         class_name: childForm.class_name || null,
@@ -136,7 +137,7 @@ export default function FamilyDetailPage() {
     if (res.ok) {
       await loadFamily();
       setChildForm({
-        first_name: "", last_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
+        first_name: "", last_name: "", hebrew_name: "", monthly_tuition: "", class_name: "", currency: "EUR",
         enrollment_start_month: "9", enrollment_start_year: String(baseYearDefault()),
         enrollment_end_month: "8", enrollment_end_year: String(baseYearDefault() + 1),
       });
@@ -159,6 +160,7 @@ export default function FamilyDetailPage() {
     setEditChildForm({
       first_name: c.first_name,
       last_name: c.last_name,
+      hebrew_name: c.hebrew_name ?? "",
       monthly_tuition: String(c.monthly_tuition),
       class_name: c.class_name ?? "",
       currency: c.currency ?? "EUR",
@@ -177,6 +179,7 @@ export default function FamilyDetailPage() {
       body: JSON.stringify({
         first_name: editChildForm.first_name,
         last_name: editChildForm.last_name,
+        hebrew_name: editChildForm.hebrew_name.trim() || null,
         monthly_tuition: Number(editChildForm.monthly_tuition) || 0,
         currency: editChildForm.currency || "EUR",
         class_name: editChildForm.class_name || null,
@@ -295,6 +298,7 @@ export default function FamilyDetailPage() {
             <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
               {[
                 ["Father", family.father_name], ["Mother", family.mother_name],
+                ["Hebrew Name", family.hebrew_name], ["Hebrew Father", family.hebrew_father_name],
                 ["Phone", family.phone], ["Email", family.email],
                 ["Address", family.address], ["City", `${family.city ?? ""} ${family.postal_code ?? ""}`.trim()],
                 ["Notes", family.notes],
@@ -309,6 +313,7 @@ export default function FamilyDetailPage() {
                   ["Family Name", "name", "text"], ["Phone", "phone", "tel"],
                   ["Father's Name", "father_name", "text"], ["Email", "email", "email"],
                   ["Mother's Name", "mother_name", "text"], ["Address", "address", "text"],
+                  ["Hebrew Family Name", "hebrew_name", "text"], ["Hebrew Father's Name", "hebrew_father_name", "text"],
                   ["City", "city", "text"], ["Postal Code", "postal_code", "text"],
                 ].map(([label, key, type]) => (
                   <div key={key as string}>
@@ -341,9 +346,9 @@ export default function FamilyDetailPage() {
         {/* Children */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Children ({children.length})</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Students ({children.length})</h2>
             {canEdit && <button onClick={() => setShowAddChild((v) => !v)} className="text-sm text-blue-600 hover:underline">
-              {showAddChild ? "Cancel" : "+ Add Child"}
+              {showAddChild ? "Cancel" : "+ Add Student"}
             </button>}
           </div>
 
@@ -358,6 +363,12 @@ export default function FamilyDetailPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Last Name *</label>
                   <input type="text" value={childForm.last_name} onChange={(e) => setChildForm((p) => ({ ...p, last_name: e.target.value }))} required
+                    className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Hebrew Name</label>
+                  <input type="text" value={childForm.hebrew_name} onChange={(e) => setChildForm((p) => ({ ...p, hebrew_name: e.target.value }))}
+                    dir="rtl" placeholder="שם בעברית"
                     className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
@@ -383,42 +394,42 @@ export default function FamilyDetailPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment Start</label>
-                  <div className="flex gap-1">
-                    <select value={childForm.enrollment_start_month} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_start_month: e.target.value }))}
-                      className="flex-1 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      {monthOptions.map(({ month, label }) => (
-                        <option key={month} value={month}>{label.split(" ")[0]}</option>
-                      ))}
-                    </select>
-                    <input type="number" value={childForm.enrollment_start_year} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_start_year: e.target.value }))}
-                      className="w-20 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Year" />
-                  </div>
+                  <select
+                    value={`${childForm.enrollment_start_month}:${childForm.enrollment_start_year}`}
+                    onChange={(e) => {
+                      const [m, y] = e.target.value.split(":");
+                      setChildForm((p) => ({ ...p, enrollment_start_month: m, enrollment_start_year: y }));
+                    }}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
+                    {monthOptions.map(({ month, year, label }) => (
+                      <option key={`${month}:${year}`} value={`${month}:${year}`}>{label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment End</label>
-                  <div className="flex gap-1">
-                    <select value={childForm.enrollment_end_month} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_end_month: e.target.value }))}
-                      className="flex-1 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      {monthOptions.map(({ month, label }) => (
-                        <option key={month} value={month}>{label.split(" ")[0]}</option>
-                      ))}
-                    </select>
-                    <input type="number" value={childForm.enrollment_end_year} onChange={(e) => setChildForm((p) => ({ ...p, enrollment_end_year: e.target.value }))}
-                      className="w-20 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Year" />
-                  </div>
+                  <select
+                    value={`${childForm.enrollment_end_month}:${childForm.enrollment_end_year}`}
+                    onChange={(e) => {
+                      const [m, y] = e.target.value.split(":");
+                      setChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
+                    }}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
+                    {monthOptions.map(({ month, year, label }) => (
+                      <option key={`${month}:${year}`} value={`${month}:${year}`}>{label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <button type="submit" disabled={savingChild}
                 className="px-4 py-1.5 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 disabled:opacity-50">
-                {savingChild ? "Adding…" : "Add Child"}
+                {savingChild ? "Adding…" : "Add Student"}
               </button>
             </form>
           )}
 
           {children.length === 0 && !showAddChild && (
-            <p className="text-gray-400 text-sm">No children registered for this family.</p>
+            <p className="text-gray-400 text-sm">No students registered for this family.</p>
           )}
 
           {children.length > 0 && (
@@ -428,6 +439,7 @@ export default function FamilyDetailPage() {
                   <th className="text-left py-2 font-semibold text-gray-600">Name</th>
                   <th className="text-left py-2 font-semibold text-gray-600">Class</th>
                   <th className="text-right py-2 font-semibold text-gray-600">Monthly Tuition</th>
+                  <th className="text-right py-2 font-semibold text-gray-600" dir="rtl">Enrollment</th>
                   {canEdit && <th className="text-right py-2 font-semibold text-gray-600">Actions</th>}
                 </tr>
               </thead>
@@ -446,6 +458,10 @@ export default function FamilyDetailPage() {
                             className="w-1/2 px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             placeholder="Last" />
                         </div>
+                        <input type="text" value={editChildForm.hebrew_name}
+                          onChange={(e) => setEditChildForm((p) => ({ ...p, hebrew_name: e.target.value }))}
+                          dir="rtl" placeholder="שם בעברית"
+                          className="w-full mt-1 px-2 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       </td>
                       <td className="py-2">
                         <input type="text" value={editChildForm.class_name}
@@ -459,6 +475,32 @@ export default function FamilyDetailPage() {
                           min="0" step="0.01"
                           className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
                           placeholder="0.00" />
+                      </td>
+                      <td className="py-2" dir="rtl">
+                        <div className="flex flex-col gap-1">
+                          <select
+                            value={`${editChildForm.enrollment_start_month}:${editChildForm.enrollment_start_year}`}
+                            onChange={(e) => {
+                              const [m, y] = e.target.value.split(":");
+                              setEditChildForm((p) => ({ ...p, enrollment_start_month: m, enrollment_start_year: y }));
+                            }}
+                            className="w-full px-1 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
+                            {monthOptions.map(({ month, year, label }) => (
+                              <option key={`s${month}:${year}`} value={`${month}:${year}`}>{label}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={`${editChildForm.enrollment_end_month}:${editChildForm.enrollment_end_year}`}
+                            onChange={(e) => {
+                              const [m, y] = e.target.value.split(":");
+                              setEditChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
+                            }}
+                            className="w-full px-1 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
+                            {monthOptions.map(({ month, year, label }) => (
+                              <option key={`e${month}:${year}`} value={`${month}:${year}`}>{label}</option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                       <td className="py-2 text-right">
                         <div className="flex gap-1 justify-end">
@@ -475,9 +517,17 @@ export default function FamilyDetailPage() {
                     </tr>
                   ) : (
                     <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="py-2 font-medium text-gray-900">{c.first_name} {c.last_name}</td>
+                      <td className="py-2">
+                        <div className="font-medium text-gray-900">{c.first_name} {c.last_name}</div>
+                        {c.hebrew_name && <div className="text-xs text-gray-500" dir="rtl">{c.hebrew_name}</div>}
+                      </td>
                       <td className="py-2 text-gray-600">{c.class_name ?? "—"}</td>
                       <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(Number(c.monthly_tuition), (c.currency as Currency) ?? "EUR")}</td>
+                      <td className="py-2 text-right text-xs text-gray-500" dir="rtl">
+                        {hebrewMonthLabel(c.enrollment_start_month ?? 9, c.enrollment_start_year ?? baseYear)}
+                        {" — "}
+                        {hebrewMonthLabel(c.enrollment_end_month ?? 8, c.enrollment_end_year ?? baseYear + 1)}
+                      </td>
                       {canEdit && (
                         <td className="py-2 text-right">
                           <div className="flex gap-2 justify-end">

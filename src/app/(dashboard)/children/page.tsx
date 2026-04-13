@@ -209,7 +209,7 @@ export default function ChildrenPage() {
                 ))}
                 {filtered.length === 0 && (
                   <tr><td colSpan={colCount} className="px-4 py-8 text-center text-gray-400">
-                    {search ? "No students match your search." : "No students yet. Add families with children to get started."}
+                    {search ? "No students match your search." : "No students yet. Add families with students to get started."}
                   </td></tr>
                 )}
               </tbody>
