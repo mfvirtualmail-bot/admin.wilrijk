@@ -33,12 +33,6 @@ function buildMonthOptions(academicYear: number) {
   });
 }
 
-const METHODS = [
-  { value: "crc", label: "CRC (Credit Card)" },
-  { value: "kas", label: "Kas (Cash)" },
-  { value: "bank", label: "Bank Transfer" },
-  { value: "other", label: "Other" },
-];
 
 export default function PaymentsImportPage() {
   const [step, setStep] = useState<WizardStep>("upload");
@@ -69,7 +63,6 @@ export default function PaymentsImportPage() {
     errors: Array<{ row: number; family: string; message: string }>;
   } | null>(null);
 
-  const [importing, setImporting] = useState(false);
   const [fileError, setFileError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -158,7 +151,7 @@ export default function PaymentsImportPage() {
         setDbFamilies(data.families);
         // Auto-match
         const overrides: Record<string, string> = {};
-        const uniqueNames = [...new Set(pms.map((p) => p.family_name))];
+        const uniqueNames = Array.from(new Set(pms.map((p) => p.family_name)));
         uniqueNames.forEach((name) => {
           const match = (data.families as { id: string; name: string }[]).find(
             (f) => f.name.toLowerCase().trim() === name.toLowerCase().trim()
@@ -180,7 +173,7 @@ export default function PaymentsImportPage() {
     setStep("preview");
   }
 
-  const uniqueExcelNames = [...new Set(payments.map((p) => p.family_name))].sort();
+  const uniqueExcelNames = Array.from(new Set(payments.map((p) => p.family_name))).sort();
   const unmatchedCount = uniqueExcelNames.filter((n) => !familyMatchOverrides[n]).length;
 
   // ── Step 4: Import ──
@@ -195,7 +188,7 @@ export default function PaymentsImportPage() {
       }))
       .filter((p) => p.family_id); // only send matched payments
 
-    setImporting(true);
+
     setStep("importing");
     try {
       const res = await fetch("/api/payments/import", {
@@ -214,8 +207,6 @@ export default function PaymentsImportPage() {
     } catch {
       alert("Network error during import");
       setStep("preview");
-    } finally {
-      setImporting(false);
     }
   }
 
