@@ -17,7 +17,7 @@ export async function GET() {
     db.from("payments").select("amount"),
     db.from("children").select("monthly_tuition").eq("is_active", true),
     db.from("payments")
-      .select("id, amount, payment_date, payment_method, families(name)")
+      .select("id, amount, payment_date, payment_method, currency, families(name, father_name)")
       .order("payment_date", { ascending: false })
       .limit(5),
   ]);

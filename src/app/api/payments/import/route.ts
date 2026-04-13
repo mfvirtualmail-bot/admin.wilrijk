@@ -12,11 +12,13 @@ async function getSessionUser() {
 
 interface ImportPayment {
   family_name: string;
+  family_id?: string; // If provided, use directly instead of name matching
   month: number;
   year: number;
   payment_date: string | null;
   payment_method: string;
   amount: number;
+  currency?: string;
   notes: string | null;
 }
 
@@ -29,18 +31,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { payments } = body as { payments: ImportPayment[] };
+  const { payments, currency: defaultCurrency } = body as { payments: ImportPayment[]; currency?: string };
 
   if (!Array.isArray(payments) || payments.length === 0)
     return NextResponse.json({ error: "No payment data provided" }, { status: 400 });
 
   const db = createServerClient();
 
-  // Build family name → id map (case-insensitive)
-  const { data: familyRows } = await db.from("families").select("id, name");
-  const familyMap = new Map<string, string>(); // lower-name → id
-  (familyRows ?? []).forEach((f: { id: string; name: string }) => {
+  // Build family name → id map as fallback (case-insensitive by name + father_name)
+  const { data: familyRows } = await db.from("families").select("id, name, father_name");
+  const familyMap = new Map<string, string>();
+  (familyRows ?? []).forEach((f: { id: string; name: string; father_name: string | null }) => {
+    // Index by plain name (for Excel matching) and by name|father_name
     familyMap.set(f.name.toLowerCase().trim(), f.id);
+    if (f.father_name) {
+      familyMap.set(`${f.name.toLowerCase().trim()}|${f.father_name.toLowerCase().trim()}`, f.id);
+    }
   });
 
   const validPayments: {
@@ -50,6 +56,7 @@ export async function POST(req: NextRequest) {
     payment_method: string;
     month: number | null;
     year: number | null;
+    currency: string;
     notes: string | null;
   }[] = [];
 
@@ -61,7 +68,12 @@ export async function POST(req: NextRequest) {
 
   payments.forEach((p, idx) => {
     const row = idx + 1;
-    const familyId = familyMap.get(p.family_name.toLowerCase().trim());
+
+    // Use family_id from frontend if provided, otherwise fall back to name matching
+    let familyId = p.family_id;
+    if (!familyId) {
+      familyId = familyMap.get(p.family_name.toLowerCase().trim());
+    }
     if (!familyId) {
       errors.push({ row, family: p.family_name, message: `Family "${p.family_name}" not found in database` });
       return;
@@ -79,6 +91,7 @@ export async function POST(req: NextRequest) {
       payment_method: method,
       month: p.month ?? null,
       year: p.year ?? null,
+      currency: p.currency || defaultCurrency || "EUR",
       notes: p.notes,
     });
   });

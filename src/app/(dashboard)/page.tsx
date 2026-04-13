@@ -21,7 +21,8 @@ interface RecentPayment {
   amount: number;
   payment_date: string;
   payment_method: string;
-  families: { name: string } | null;
+  currency?: string;
+  families: { name: string; father_name: string | null } | null;
 }
 
 const METHOD_SHORT: Record<string, string> = { crc: "CRC", kas: "KAS", bank: "BANK", other: "—" };
@@ -148,7 +149,7 @@ export default function DashboardPage() {
                 {recentPayments.map((p) => (
                   <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0">
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{p.families?.name ?? "—"}</p>
+                      <p className="text-sm font-medium text-gray-900">{p.families ? (p.families.father_name ? `${p.families.name} (${p.families.father_name})` : p.families.name) : "—"}</p>
                       <p className="text-xs text-gray-500">{formatDate(p.payment_date)} · <span className="font-mono">{METHOD_SHORT[p.payment_method] ?? p.payment_method}</span></p>
                     </div>
                     <span className="text-sm font-semibold text-green-700">{formatEur(Number(p.amount))}</span>

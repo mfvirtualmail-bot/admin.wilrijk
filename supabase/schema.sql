@@ -64,9 +64,14 @@ CREATE TABLE IF NOT EXISTS children (
   last_name VARCHAR(200) NOT NULL,
   date_of_birth DATE,
   class_name VARCHAR(100),
-  monthly_tuition DECIMAL(10,2) NOT NULL DEFAULT 0,  -- EUR
+  monthly_tuition DECIMAL(10,2) NOT NULL DEFAULT 0,
+  currency VARCHAR(3) NOT NULL DEFAULT 'EUR',  -- EUR, USD, GBP
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   enrollment_date DATE,
+  enrollment_start_month SMALLINT DEFAULT 9,   -- Academic start month (default Sep)
+  enrollment_start_year SMALLINT,              -- Academic start year
+  enrollment_end_month SMALLINT DEFAULT 8,     -- Academic end month (default Aug)
+  enrollment_end_year SMALLINT,                -- Academic end year
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -81,7 +86,8 @@ CREATE TABLE IF NOT EXISTS charges (
   family_id UUID NOT NULL REFERENCES families(id) ON DELETE CASCADE,
   month SMALLINT NOT NULL CHECK (month BETWEEN 1 AND 12),
   year SMALLINT NOT NULL,
-  amount DECIMAL(10,2) NOT NULL,  -- EUR
+  amount DECIMAL(10,2) NOT NULL,
+  currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -96,7 +102,8 @@ CREATE INDEX idx_charges_period ON charges(year, month);
 CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   family_id UUID NOT NULL REFERENCES families(id) ON DELETE CASCADE,
-  amount DECIMAL(10,2) NOT NULL,   -- EUR
+  amount DECIMAL(10,2) NOT NULL,
+  currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
   payment_date DATE NOT NULL,
   payment_method VARCHAR(20) NOT NULL,  -- 'crc' (credit card), 'kas' (cash), 'bank', 'other'
   month SMALLINT CHECK (month BETWEEN 1 AND 12),  -- which month this payment covers

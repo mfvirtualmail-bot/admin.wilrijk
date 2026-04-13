@@ -363,11 +363,12 @@ export function processFamilyRows(
       return;
     }
 
-    const key = familyName.toLowerCase();
+    const fatherName = get("father_name") || null;
+    const key = fatherName ? `${familyName.toLowerCase()}|${fatherName.toLowerCase()}` : familyName.toLowerCase();
     if (!familyMap.has(key)) {
       familyMap.set(key, {
         name: familyName,
-        father_name: get("father_name") || null,
+        father_name: fatherName,
         mother_name: get("mother_name") || null,
         address: get("address") || null,
         city: get("city") || null,

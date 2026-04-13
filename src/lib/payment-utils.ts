@@ -1,4 +1,4 @@
-import type { PaymentMethod } from "./types";
+import type { PaymentMethod, Currency } from "./types";
 
 export const METHOD_LABELS: Record<PaymentMethod, string> = {
   crc: "Credit Card (crc)",
@@ -19,10 +19,22 @@ export const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
 export const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+export const CURRENCY_SYMBOLS: Record<Currency, string> = { EUR: "€", USD: "$", GBP: "£" };
+export const CURRENCY_OPTIONS: { value: Currency; label: string }[] = [
+  { value: "EUR", label: "€ Euro" },
+  { value: "USD", label: "$ Dollar" },
+  { value: "GBP", label: "£ Pound" },
+];
+
 export function formatDate(d: string) {
   return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
 }
 
+export function formatCurrency(n: number, currency: Currency = "EUR"): string {
+  const sym = CURRENCY_SYMBOLS[currency] ?? "€";
+  return sym + n.toLocaleString("nl-BE", { minimumFractionDigits: 2 });
+}
+
 export function formatEur(n: number) {
-  return "€" + n.toLocaleString("nl-BE", { minimumFractionDigits: 2 });
+  return formatCurrency(n, "EUR");
 }

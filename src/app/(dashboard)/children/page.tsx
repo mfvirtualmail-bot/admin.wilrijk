@@ -5,6 +5,7 @@ import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
 import { formatEur } from "@/lib/payment-utils";
+import { familyDisplayName } from "@/lib/family-utils";
 
 interface ChildRow {
   id: string;
@@ -14,7 +15,7 @@ interface ChildRow {
   class_name: string | null;
   monthly_tuition: number;
   is_active: boolean;
-  families: { name: string } | null;
+  families: { name: string; father_name: string | null } | null;
 }
 
 export default function ChildrenPage() {
@@ -183,7 +184,7 @@ export default function ChildrenPage() {
                     <td className="px-4 py-3 font-medium text-gray-900">{c.first_name} {c.last_name}</td>
                     <td className="px-4 py-3">
                       <Link href={`/families/${c.family_id}`} className="text-blue-600 hover:underline">
-                        {c.families?.name ?? "—"}
+                        {c.families ? familyDisplayName(c.families.name, c.families.father_name) : "—"}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{c.class_name ?? "—"}</td>

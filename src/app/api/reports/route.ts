@@ -34,7 +34,7 @@ export async function GET() {
   const maxYear = academicYear + 1;
 
   const [familiesRes, childrenRes, paymentsRes] = await Promise.all([
-    db.from("families").select("id, name").eq("is_active", true).order("name"),
+    db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
     db.from("children").select("family_id, monthly_tuition").eq("is_active", true),
     db.from("payments")
       .select("id, family_id, amount, payment_date, payment_method, month, year")
@@ -91,7 +91,7 @@ export async function GET() {
       const charged = tuition * months.length;
       const paid = paymentsByFamily[f.id] ?? 0;
       const due = charged - paid;
-      return { id: f.id, name: f.name, charged, paid, due };
+      return { id: f.id, name: f.father_name ? `${f.name} (${f.father_name})` : f.name, charged, paid, due };
     })
     .filter((f) => f.due > 0)
     .sort((a, b) => b.due - a.due);

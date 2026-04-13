@@ -197,7 +197,7 @@ export default function FamiliesPage() {
                         href={`/families/${f.id}`}
                         className="font-medium text-blue-600 hover:underline"
                       >
-                        {f.name}
+                        {f.father_name ? `${f.name} (${f.father_name})` : f.name}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-gray-700">{f.father_name ?? "—"}</td>

@@ -47,7 +47,7 @@ export async function GET() {
 
   // Load all active families, their children, and relevant payments
   const [familiesRes, childrenRes, paymentsRes] = await Promise.all([
-    db.from("families").select("id, name").eq("is_active", true).order("name"),
+    db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
     db.from("children").select("family_id, monthly_tuition").eq("is_active", true),
     db.from("payments")
       .select("id, family_id, amount, payment_date, payment_method, month, year, notes")
@@ -113,7 +113,7 @@ export async function GET() {
 
     return {
       familyId: family.id,
-      familyName: family.name,
+      familyName: family.father_name ? `${family.name} (${family.father_name})` : family.name,
       monthlyTuition,
       totalCharged,
       totalPaid,

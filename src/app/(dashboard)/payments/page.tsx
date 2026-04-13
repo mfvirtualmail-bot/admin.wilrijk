@@ -4,10 +4,11 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, METHOD_COLORS, MONTHS, formatDate, formatEur } from "@/lib/payment-utils";
-import type { Payment, PaymentMethod } from "@/lib/types";
+import { METHOD_LABELS, METHOD_COLORS, MONTHS, formatDate, formatCurrency } from "@/lib/payment-utils";
+import { familyDisplayName } from "@/lib/family-utils";
+import type { Payment, PaymentMethod, Currency } from "@/lib/types";
 
-type PaymentWithFamily = Payment & { families: { name: string } | null };
+type PaymentWithFamily = Payment & { families: { name: string; father_name: string | null } | null };
 
 export default function PaymentsPage() {
   const { user } = useAuth();
@@ -110,7 +111,7 @@ export default function PaymentsPage() {
             ))}
           </select>
           <span className="text-sm text-gray-500">{filtered.length} payments</span>
-          <span className="text-sm font-semibold text-gray-700">Total: {formatEur(total)}</span>
+          <span className="text-sm font-semibold text-gray-700">Total: {formatCurrency(total)}</span>
           {canDelete && selectedCount > 0 && (
             <button
               onClick={handleBulkDelete}
@@ -178,7 +179,7 @@ export default function PaymentsPage() {
                     )}
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(p.payment_date)}</td>
                     <td className="px-4 py-3 font-medium text-gray-900">
-                      <Link href={`/families/${p.family_id}`} className="hover:text-blue-600">{p.families?.name ?? "—"}</Link>
+                      <Link href={`/families/${p.family_id}`} className="hover:text-blue-600">{p.families ? familyDisplayName(p.families.name, p.families.father_name) : "—"}</Link>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${METHOD_COLORS[p.payment_method]}`}>
@@ -189,7 +190,7 @@ export default function PaymentsPage() {
                       {p.month && p.year ? `${MONTHS[p.month]} ${p.year}` : <span className="text-gray-400 italic">Unallocated</span>}
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{p.notes ?? "—"}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatEur(Number(p.amount))}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(Number(p.amount), (p.currency as Currency) ?? "EUR")}</td>
                     {canDelete && (
                       <td className="px-4 py-3 text-right">
                         <button onClick={() => handleDelete(p.id)} disabled={deleting === p.id || bulkDeleting}
