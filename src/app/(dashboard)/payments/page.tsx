@@ -54,9 +54,17 @@ export default function PaymentsPage() {
           <span className="text-sm text-gray-500">{filtered.length} payments</span>
           <span className="text-sm font-semibold text-gray-700">Total: {formatEur(total)}</span>
           {canAdd && (
-            <Link href="/payments/new" className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm">
-              + New Payment
-            </Link>
+            <>
+              <Link
+                href="/payments/import"
+                className="ml-auto px-4 py-2 border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 font-medium text-sm"
+              >
+                Import from Excel
+              </Link>
+              <Link href="/payments/new" className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm">
+                + New Payment
+              </Link>
+            </>
           )}
         </div>
 
