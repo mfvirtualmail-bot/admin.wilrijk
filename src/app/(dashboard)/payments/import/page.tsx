@@ -151,7 +151,7 @@ export default function PaymentsImportPage() {
         setDbFamilies(data.families);
         // Auto-match
         const overrides: Record<string, string> = {};
-        const uniqueNames = [...new Set(pms.map((p) => p.family_name))];
+        const uniqueNames = Array.from(new Set(pms.map((p) => p.family_name)));
         uniqueNames.forEach((name) => {
           const match = (data.families as { id: string; name: string }[]).find(
             (f) => f.name.toLowerCase().trim() === name.toLowerCase().trim()
@@ -173,7 +173,7 @@ export default function PaymentsImportPage() {
     setStep("preview");
   }
 
-  const uniqueExcelNames = [...new Set(payments.map((p) => p.family_name))].sort();
+  const uniqueExcelNames = Array.from(new Set(payments.map((p) => p.family_name))).sort();
   const unmatchedCount = uniqueExcelNames.filter((n) => !familyMatchOverrides[n]).length;
 
   // ── Step 4: Import ──
