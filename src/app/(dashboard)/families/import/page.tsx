@@ -130,8 +130,6 @@ export default function FamiliesImportPage() {
     } catch {
       alert("Network error during import");
       setStep("preview");
-    } finally {
-
     }
   }
 

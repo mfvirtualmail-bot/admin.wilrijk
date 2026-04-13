@@ -207,8 +207,6 @@ export default function PaymentsImportPage() {
     } catch {
       alert("Network error during import");
       setStep("preview");
-    } finally {
-
     }
   }
 

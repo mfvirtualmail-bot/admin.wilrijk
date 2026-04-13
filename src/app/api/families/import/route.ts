@@ -126,14 +126,15 @@ export async function POST(req: NextRequest) {
         continue;
       }
       familyId = data.id;
-      existingMap.set(nameKey, familyId);
+      existingMap.set(nameKey, data.id);
       createdFamilies++;
     }
 
     // Insert children
     if (importFamily.children.length > 0 && familyId) {
+      const fid = familyId;
       const childRows = importFamily.children.map((c) => ({
-        family_id: familyId,
+        family_id: fid,
         first_name: c.first_name,
         last_name: c.last_name,
         date_of_birth: c.date_of_birth,
