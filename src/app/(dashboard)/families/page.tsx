@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
+import { exportToExcel } from "@/lib/export-utils";
 import type { Family } from "@/lib/types";
 
 export default function FamiliesPage() {
@@ -84,6 +85,24 @@ export default function FamiliesPage() {
     setDeleting(null);
   }, []);
 
+  // Excel export
+  async function handleExport() {
+    const headers = ["Family Name", "Father", "Mother", "City", "Postal Code", "Address", "Phone", "Email", "Status", "Notes"];
+    const data = filtered.map((f) => [
+      f.name,
+      f.father_name ?? "",
+      f.mother_name ?? "",
+      f.city ?? "",
+      f.postal_code ?? "",
+      f.address ?? "",
+      f.phone ?? "",
+      f.email ?? "",
+      f.is_active ? "Active" : "Inactive",
+      f.notes ?? "",
+    ]);
+    await exportToExcel("families", "Families", headers, data);
+  }
+
   // Bulk delete
   async function handleBulkDelete() {
     if (!confirm(`Delete ${selectedCount} ${selectedCount === 1 ? "family" : "families"}? This cannot be undone.`)) return;
@@ -129,6 +148,13 @@ export default function FamiliesPage() {
               {bulkDeleting ? "Deleting…" : `Delete ${selectedCount} selected`}
             </button>
           )}
+          <button
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="ml-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm disabled:opacity-40"
+          >
+            Export Excel
+          </button>
           {canDelete && (
             <>
               <Link
@@ -139,7 +165,7 @@ export default function FamiliesPage() {
               </Link>
               <Link
                 href="/families/new"
-                className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm"
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm"
               >
                 + Add Family
               </Link>

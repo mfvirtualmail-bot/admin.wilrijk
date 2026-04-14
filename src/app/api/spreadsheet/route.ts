@@ -61,11 +61,14 @@ export async function GET() {
   const children = childrenRes.data ?? [];
   const payments = paymentsRes.data ?? [];
 
-  // Index monthly tuition per family
+  // Index monthly tuition and student count per family
   const tuitionByFamily: Record<string, number> = {};
+  const studentCountByFamily: Record<string, number> = {};
   for (const c of children) {
     tuitionByFamily[c.family_id] = (tuitionByFamily[c.family_id] ?? 0) + Number(c.monthly_tuition);
+    studentCountByFamily[c.family_id] = (studentCountByFamily[c.family_id] ?? 0) + 1;
   }
+  const totalStudents = children.length;
 
   // Index payments by family+month+year (take the most recent if multiple)
   const paymentIndex: Record<string, typeof payments[0]> = {};
@@ -79,6 +82,7 @@ export async function GET() {
   // Build row data
   const rows = families.map((family) => {
     const monthlyTuition = tuitionByFamily[family.id] ?? 0;
+    const studentCount = studentCountByFamily[family.id] ?? 0;
     const monthData: Record<string, {
       paymentId: string | null;
       date: string | null;
@@ -115,6 +119,7 @@ export async function GET() {
       familyId: family.id,
       familyName: family.father_name ? `${family.name} (${family.father_name})` : family.name,
       monthlyTuition,
+      studentCount,
       totalCharged,
       totalPaid,
       balance: totalCharged - totalPaid,
@@ -125,6 +130,7 @@ export async function GET() {
   return NextResponse.json({
     rows,
     academicYear,
+    totalStudents,
     months: months.map((m) => ({
       ...m,
       key: `m_${m.month}_${m.year}`,

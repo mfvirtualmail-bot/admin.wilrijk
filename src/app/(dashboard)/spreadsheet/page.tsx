@@ -68,6 +68,7 @@ export default function SpreadsheetPage() {
   const [rowData, setRowData] = useState<SpreadsheetRow[]>([]);
   const [months, setMonths] = useState<MonthMeta[]>([]);
   const [academicYear, setAcademicYear] = useState<number>(0);
+  const [totalStudents, setTotalStudents] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -82,6 +83,7 @@ export default function SpreadsheetPage() {
         setRowData(d.rows);
         setMonths(d.months);
         setAcademicYear(d.academicYear);
+        setTotalStudents(d.totalStudents ?? 0);
       })
       .catch(() => setError("Failed to load spreadsheet data"))
       .finally(() => setLoading(false));
@@ -227,7 +229,7 @@ export default function SpreadsheetPage() {
               const method = cell?.method;
               if (!method) return { color: "#d1d5db" };
               const colors: Record<string, string> = {
-                crc: "#1d4ed8", kas: "#15803d", bank: "#7e22ce", other: "#6b7280",
+                crc: "#1d4ed8", kas: "#15803d", bank: "#7e22ce", jj: "#b45309", other: "#6b7280",
               };
               return { color: colors[method] ?? "#374151", fontWeight: "600" };
             },
@@ -353,6 +355,7 @@ export default function SpreadsheetPage() {
         </span>
         <span className="text-gray-400">|</span>
         <span className="text-gray-600">{rowData.length} families</span>
+        <span className="text-gray-600">{totalStudents} students</span>
         <span className="text-gray-600">Total paid: <strong className="text-green-700">€{totalPaidAll.toLocaleString("nl-BE")}</strong></span>
         <span className="text-gray-600">Total due: <strong className="text-red-600">€{totalDueAll.toLocaleString("nl-BE")}</strong></span>
 

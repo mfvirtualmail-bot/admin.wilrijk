@@ -63,8 +63,7 @@ export async function POST(req: NextRequest) {
   const errors: Array<{ row: number; family: string; message: string }> = [];
   let skipped = 0;
 
-  const validMethods = new Set(["crc", "kas", "bank", "other"]);
-  const today = new Date().toISOString().slice(0, 10);
+  const validMethods = new Set(["crc", "kas", "bank", "jj", "other"]);
 
   payments.forEach((p, idx) => {
     const row = idx + 1;
@@ -82,7 +81,18 @@ export async function POST(req: NextRequest) {
     if (!p.amount || p.amount <= 0) { skipped++; return; }
 
     const method = validMethods.has(p.payment_method) ? p.payment_method : "other";
-    const paymentDate = p.payment_date || today;
+
+    // If the date couldn't be parsed from Excel, fall back to the 1st of the
+    // payment's allocated month/year (NOT today's date — that would lose info).
+    // Only fall back to today as a last resort if no month/year either.
+    let paymentDate = p.payment_date;
+    if (!paymentDate) {
+      if (p.month && p.year) {
+        paymentDate = `${p.year}-${String(p.month).padStart(2, "0")}-01`;
+      } else {
+        paymentDate = new Date().toISOString().slice(0, 10);
+      }
+    }
 
     validPayments.push({
       family_id: familyId,

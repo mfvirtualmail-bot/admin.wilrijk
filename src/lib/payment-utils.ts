@@ -4,6 +4,7 @@ export const METHOD_LABELS: Record<PaymentMethod, string> = {
   crc: "Credit Card (crc)",
   kas: "Cash (kas)",
   bank: "Bank transfer",
+  jj: "JJ",
   other: "Other",
 };
 
@@ -11,6 +12,7 @@ export const METHOD_COLORS: Record<PaymentMethod, string> = {
   crc: "bg-blue-100 text-blue-700",
   kas: "bg-green-100 text-green-700",
   bank: "bg-purple-100 text-purple-700",
+  jj: "bg-amber-100 text-amber-700",
   other: "bg-gray-100 text-gray-600",
 };
 
