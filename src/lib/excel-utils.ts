@@ -261,6 +261,19 @@ export function parseEuropeanDate(raw: unknown): string | null {
 }
 
 /**
+ * Detect currency from an amount string based on currency symbols.
+ * Returns the detected currency code or "EUR" as default.
+ */
+export function detectCurrency(raw: unknown): string {
+  if (!raw) return "EUR";
+  const s = String(raw);
+  if (/\$/.test(s)) return "USD";
+  if (/£/.test(s)) return "GBP";
+  if (/€/.test(s)) return "EUR";
+  return "EUR"; // Default to EUR
+}
+
+/**
  * Parse an amount value, stripping currency symbols and whitespace.
  * Returns null for empty/zero values.
  */
@@ -441,6 +454,7 @@ export interface ImportPayment {
   payment_date: string | null;
   payment_method: PaymentMethod;
   amount: number;
+  currency: string;
   notes: string | null;
   sourceRow: number;
 }
@@ -475,11 +489,7 @@ export function processPaymentRows(
 
       const paymentDate = parseEuropeanDate(rawDate);
       const method = normalizePaymentMethod(rawMethod);
-
-      // If the original amount string had a currency symbol, keep it as note
-      const amountStr = String(rawAmount ?? "");
-      const hasUnusualCurrency = /[£$]/.test(amountStr);
-      const notes = hasUnusualCurrency ? `Original: ${amountStr.trim()}` : null;
+      const currency = detectCurrency(rawAmount);
 
       payments.push({
         family_name: name,
@@ -488,7 +498,8 @@ export function processPaymentRows(
         payment_date: paymentDate,
         payment_method: method,
         amount,
-        notes,
+        currency,
+        notes: null,
         sourceRow: excelRow,
       });
     }
