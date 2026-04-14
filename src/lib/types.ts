@@ -71,7 +71,7 @@ export interface Charge {
   updated_at: string;
 }
 
-export type PaymentMethod = "crc" | "kas" | "bank" | "other";
+export type PaymentMethod = "crc" | "kas" | "bank" | "jj" | "other";
 
 export interface Payment {
   id: string;

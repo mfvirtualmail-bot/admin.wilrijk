@@ -37,6 +37,7 @@ function buildMonthOptions(academicYear: number) {
 export default function PaymentsImportPage() {
   const [step, setStep] = useState<WizardStep>("upload");
   const [academicYear, setAcademicYear] = useState(defaultAcademicYear());
+  const [defaultCurrency, setDefaultCurrency] = useState<string>("EUR");
 
   // Excel parse result
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -55,6 +56,7 @@ export default function PaymentsImportPage() {
   // Family matching: name → db family id (populated from API)
   const [dbFamilies, setDbFamilies] = useState<{ id: string; name: string; father_name: string | null }[]>([]);
   const [familyMatchOverrides, setFamilyMatchOverrides] = useState<Record<string, string>>({}); // excel-name → family-id or ""
+  const [currencyOverrides, setCurrencyOverrides] = useState<Record<number, string>>({}); // payment index → currency
 
   // Import result
   const [importResult, setImportResult] = useState<{
@@ -139,7 +141,18 @@ export default function PaymentsImportPage() {
   }
 
   async function goToMatch() {
-    const { payments: pms, errors: errs } = processPaymentRows(rows, familyNameCol, monthGroups);
+    const result = processPaymentRows(rows, familyNameCol, monthGroups);
+    let pms = result.payments;
+    const errs = result.errors;
+
+    // Apply currency overrides if any
+    if (Object.keys(currencyOverrides).length > 0) {
+      pms = pms.map((p, idx) => ({
+        ...p,
+        currency: currencyOverrides[idx] || p.currency,
+      }));
+    }
+
     setPayments(pms);
     setParseErrors(errs);
 
@@ -179,12 +192,13 @@ export default function PaymentsImportPage() {
   // ── Step 4: Import ──
 
   async function handleImport() {
-    // Resolve family names to IDs in the payment list
+    // Resolve family names to IDs in the payment list and apply currency overrides
     const resolvedPayments = payments
-      .map((p) => ({
+      .map((p, idx) => ({
         ...p,
         family_name: p.family_name,
         family_id: familyMatchOverrides[p.family_name] || undefined,
+        currency: currencyOverrides[idx] || p.currency, // Apply currency overrides
       }))
       .filter((p) => p.family_id); // only send matched payments
 
@@ -275,6 +289,22 @@ export default function PaymentsImportPage() {
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
                   The academic year the payments in this file belong to.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Default Currency</label>
+                <select
+                  value={defaultCurrency}
+                  onChange={(e) => setDefaultCurrency(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="EUR">€ Euro (EUR)</option>
+                  <option value="USD">$ Dollar (USD)</option>
+                  <option value="GBP">£ Pound (GBP)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Used for amounts without currency symbols. Amounts with $, £, or € symbols will be detected automatically.
                 </p>
               </div>
 
@@ -611,6 +641,20 @@ export default function PaymentsImportPage() {
                     <div>Payments skipped (unmatched families)</div>
                   </div>
                 )}
+                {/* Show unique currencies being imported */}
+                {(() => {
+                  const currencies = Array.from(new Set(
+                    payments
+                      .filter((p) => familyMatchOverrides[p.family_name])
+                      .map((p, idx) => currencyOverrides[idx] || p.currency)
+                  ));
+                  return currencies.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-blue-800">
+                      <div className="text-2xl font-bold">{currencies.join(", ")}</div>
+                      <div>Currencies detected</div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Preview table */}
@@ -627,12 +671,16 @@ export default function PaymentsImportPage() {
                         <th className="text-left px-4 py-2 font-semibold text-gray-600">Date</th>
                         <th className="text-left px-4 py-2 font-semibold text-gray-600">Method</th>
                         <th className="text-right px-4 py-2 font-semibold text-gray-600">Amount</th>
+                        <th className="text-left px-4 py-2 font-semibold text-gray-600">Currency</th>
                         <th className="text-left px-4 py-2 font-semibold text-gray-600">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {payments.slice(0, 30).map((p, i) => {
                         const matched = !!familyMatchOverrides[p.family_name];
+                        const currencySymbols: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
+                        const currentCurrency = currencyOverrides[i] || p.currency;
+                        const currencySymbol = currencySymbols[currentCurrency] || "€";
                         return (
                           <tr
                             key={i}
@@ -651,7 +699,23 @@ export default function PaymentsImportPage() {
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right font-semibold text-gray-900">
-                              €{p.amount.toFixed(2)}
+                              {currencySymbol}{p.amount.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2">
+                              <select
+                                value={currentCurrency}
+                                onChange={(e) =>
+                                  setCurrencyOverrides((prev) => ({
+                                    ...prev,
+                                    [i]: e.target.value,
+                                  }))
+                                }
+                                className="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                              >
+                                <option value="EUR">€ EUR</option>
+                                <option value="USD">$ USD</option>
+                                <option value="GBP">£ GBP</option>
+                              </select>
                             </td>
                             <td className="px-4 py-2">
                               {matched ? (
@@ -750,6 +814,8 @@ export default function PaymentsImportPage() {
                     setMonthGroups([]);
                     setParseErrors([]);
                     setImportResult(null);
+                    setCurrencyOverrides({});
+                    setFamilyMatchOverrides({});
                     if (fileInputRef.current) fileInputRef.current.value = "";
                   }}
                   className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium text-sm"

@@ -123,3 +123,80 @@ export function hebrewMonthLabel(gregorianMonth: number, gregorianYear: number):
   const hebrewYear = getHebrewYear(gregorianYear, gregorianMonth);
   return `${monthName} ${hebrewYearToLetters(hebrewYear)}`;
 }
+
+/**
+ * Map of English Hebrew month names (as returned by Intl hebrew calendar)
+ * to academic-year index (Elul=0 … Av=11). Adar I / Adar II in leap years
+ * are both treated as Adar (index 6).
+ */
+const HEBREW_MONTH_TO_ACADEMIC_INDEX: Record<string, number> = {
+  Elul: 0,
+  Tishri: 1, Tishrei: 1,
+  Heshvan: 2, Cheshvan: 2, Marcheshvan: 2,
+  Kislev: 3,
+  Tevet: 4, Teves: 4,
+  Shevat: 5, "Sh'vat": 5,
+  Adar: 6, "Adar I": 6, "Adar II": 6,
+  Nisan: 7,
+  Iyar: 8, Iyyar: 8,
+  Sivan: 9,
+  Tamuz: 10, Tammuz: 10,
+  Av: 11,
+};
+
+/**
+ * Returns today's Hebrew month academic-year index (0..11) and Hebrew year,
+ * using the system Hebrew calendar (Intl). Returns null if the environment
+ * doesn't support it.
+ */
+export function currentHebrewMonth(now: Date = new Date()): { index: number; hebrewYear: number } | null {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-u-ca-hebrew", { month: "long", year: "numeric" });
+    const parts = fmt.formatToParts(now);
+    const monthName = parts.find((p) => p.type === "month")?.value ?? "";
+    const yearStr = parts.find((p) => p.type === "year")?.value ?? "";
+    const hebrewYear = parseInt(yearStr.replace(/\D/g, ""), 10);
+    const index = HEBREW_MONTH_TO_ACADEMIC_INDEX[monthName];
+    if (index == null || !hebrewYear) return null;
+    return { index, hebrewYear };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns how many academic months have ALREADY STARTED for the given
+ * academic year, as of `now`. Each Hebrew month is considered charged
+ * from its 1st day (Rosh Chodesh).
+ *
+ * Academic year N (e.g. 2025) covers:
+ *   Elul of Hebrew year (N + 3760)  → index 0
+ *   Tishri … Av of Hebrew year (N + 3761) → indexes 1..11
+ *
+ * Returns 0 if the academic year hasn't started, 12 if it has fully ended.
+ */
+export function elapsedAcademicMonths(academicYear: number, now: Date = new Date()): number {
+  const cur = currentHebrewMonth(now);
+  if (!cur) {
+    // Fallback: use Gregorian approximation
+    const m = now.getMonth() + 1;
+    const y = now.getFullYear();
+    const curAcademic = m >= 9 ? y : y - 1;
+    if (curAcademic < academicYear) return 0;
+    if (curAcademic > academicYear) return 12;
+    return Math.min(12, gregorianMonthToIndex(m) + 1);
+  }
+
+  const startHebYear = academicYear + 3760; // year containing Elul (1st month)
+  const mainHebYear = academicYear + 3761;  // year containing Tishri..Av
+
+  if (cur.hebrewYear < startHebYear) return 0;
+  if (cur.hebrewYear === startHebYear) {
+    // Only Elul (index 0) of this year counts as "started"
+    return cur.index === 0 ? 1 : 0;
+  }
+  if (cur.hebrewYear > mainHebYear) return 12;
+  // cur.hebrewYear === mainHebYear: Tishri..Av are 1..11, Elul = next year's start
+  if (cur.index === 0) return 12; // Elul of next academic year → this year is done
+  return Math.min(12, cur.index + 1);
+}

@@ -236,28 +236,64 @@ export function suggestPaymentMappings(
 // ──────────────────────────────────────────────
 
 /**
- * Parse a European date string (DD-MM-YY or DD-MM-YYYY or DD/MM/YYYY) to ISO date.
+ * Parse a European date value (DD-MM-YY or DD-MM-YYYY or DD/MM/YYYY) to ISO date.
+ * Also handles JS Date objects (returned by xlsx with cellDates: true) and
+ * US-style MM/DD/YYYY as a fallback when DD/MM doesn't validate.
  * Returns null if parsing fails.
  */
 export function parseEuropeanDate(raw: unknown): string | null {
-  if (!raw) return null;
+  if (raw == null || raw === "") return null;
+
+  // Handle Date objects directly (xlsx returns these when cellDates: true)
+  if (raw instanceof Date) {
+    if (isNaN(raw.getTime())) return null;
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, "0");
+    const d = String(raw.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
   const s = String(raw).trim();
   if (!s) return null;
 
   // Already ISO format YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // DD-MM-YY or DD-MM-YYYY or DD/MM/YYYY
+  // DD-MM-YY or DD-MM-YYYY or DD/MM/YYYY (European)
   const match = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (!match) return null;
-  const [, d, m, y] = match;
-  const day = parseInt(d, 10);
-  const month = parseInt(m, 10);
+  const [, a, b, y] = match;
+  const first = parseInt(a, 10);
+  const second = parseInt(b, 10);
   let year = parseInt(y, 10);
   if (year < 100) year += 2000;
 
+  // Try European format first (DD-MM-YY)
+  let day = first;
+  let month = second;
+
+  // If European doesn't validate but US would (e.g. "05/20/25"),
+  // fall back to MM-DD-YY to handle ambiguous cases.
+  if ((month < 1 || month > 12) && first >= 1 && first <= 12 && second >= 1 && second <= 31) {
+    day = second;
+    month = first;
+  }
+
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Detect currency from an amount string based on currency symbols.
+ * Returns the detected currency code or "EUR" as default.
+ */
+export function detectCurrency(raw: unknown): string {
+  if (!raw) return "EUR";
+  const s = String(raw);
+  if (/\$/.test(s)) return "USD";
+  if (/£/.test(s)) return "GBP";
+  if (/€/.test(s)) return "EUR";
+  return "EUR"; // Default to EUR
 }
 
 /**
@@ -278,9 +314,10 @@ const METHOD_MAP: Record<string, PaymentMethod> = {
   crc: "crc", credit: "crc", "credit card": "crc",
   kas: "kas", cash: "kas", contant: "kas",
   bank: "bank", transfer: "bank", overschrijving: "bank",
+  jj: "jj",
   other: "other", anders: "other",
   // Unknown codes become "other"
-  jj: "other", "#": "other",
+  "#": "other",
 };
 
 /**
@@ -441,6 +478,7 @@ export interface ImportPayment {
   payment_date: string | null;
   payment_method: PaymentMethod;
   amount: number;
+  currency: string;
   notes: string | null;
   sourceRow: number;
 }
@@ -475,11 +513,7 @@ export function processPaymentRows(
 
       const paymentDate = parseEuropeanDate(rawDate);
       const method = normalizePaymentMethod(rawMethod);
-
-      // If the original amount string had a currency symbol, keep it as note
-      const amountStr = String(rawAmount ?? "");
-      const hasUnusualCurrency = /[£$]/.test(amountStr);
-      const notes = hasUnusualCurrency ? `Original: ${amountStr.trim()}` : null;
+      const currency = detectCurrency(rawAmount);
 
       payments.push({
         family_name: name,
@@ -488,7 +522,8 @@ export function processPaymentRows(
         payment_date: paymentDate,
         payment_method: method,
         amount,
-        notes,
+        currency,
+        notes: null,
         sourceRow: excelRow,
       });
     }

@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
 import { METHOD_LABELS, METHOD_COLORS, MONTHS, formatDate, formatCurrency } from "@/lib/payment-utils";
 import { familyDisplayName } from "@/lib/family-utils";
+import { exportToExcel } from "@/lib/export-utils";
 import type { Payment, PaymentMethod, Currency } from "@/lib/types";
 
 type PaymentWithFamily = Payment & { families: { name: string; father_name: string | null } | null };
@@ -76,6 +77,21 @@ export default function PaymentsPage() {
     setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
+  // Excel export
+  async function handleExport() {
+    const headers = ["Date", "Family", "Method", "Period", "Amount", "Currency", "Notes"];
+    const data = filtered.map((p) => [
+      formatDate(p.payment_date),
+      p.families ? familyDisplayName(p.families.name, p.families.father_name) : "",
+      METHOD_LABELS[p.payment_method] ?? p.payment_method,
+      p.month && p.year ? `${MONTHS[p.month]} ${p.year}` : "",
+      Number(p.amount),
+      (p.currency as Currency) ?? "EUR",
+      p.notes ?? "",
+    ]);
+    await exportToExcel("payments", "Payments", headers, data);
+  }
+
   // Bulk delete
   async function handleBulkDelete() {
     if (!confirm(`Delete ${selectedCount} ${selectedCount === 1 ? "payment" : "payments"}? This cannot be undone.`)) return;
@@ -121,11 +137,18 @@ export default function PaymentsPage() {
               {bulkDeleting ? "Deleting…" : `Delete ${selectedCount} selected`}
             </button>
           )}
+          <button
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="ml-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm disabled:opacity-40"
+          >
+            Export Excel
+          </button>
           {canAdd && (
             <>
               <Link
                 href="/payments/import"
-                className="ml-auto px-4 py-2 border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 font-medium text-sm"
+                className="px-4 py-2 border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 font-medium text-sm"
               >
                 Import from Excel
               </Link>

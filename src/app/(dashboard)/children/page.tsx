@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
 import { formatEur } from "@/lib/payment-utils";
 import { familyDisplayName } from "@/lib/family-utils";
+import { exportToExcel } from "@/lib/export-utils";
 
 interface ChildRow {
   id: string;
@@ -93,6 +94,20 @@ export default function ChildrenPage() {
     setDeleting(null);
   }, []);
 
+  // Excel export
+  async function handleExport() {
+    const headers = ["First Name", "Last Name", "Family", "Class", "Monthly Tuition (€)", "Status"];
+    const data = filtered.map((c) => [
+      c.first_name,
+      c.last_name,
+      c.families ? familyDisplayName(c.families.name, c.families.father_name) : "",
+      c.class_name ?? "",
+      Number(c.monthly_tuition),
+      c.is_active ? "Active" : "Inactive",
+    ]);
+    await exportToExcel("students", "Students", headers, data);
+  }
+
   // Bulk delete
   async function handleBulkDelete() {
     if (!confirm(`Delete ${selectedCount} ${selectedCount === 1 ? "student" : "students"}? This cannot be undone.`)) return;
@@ -134,7 +149,14 @@ export default function ChildrenPage() {
               {bulkDeleting ? "Deleting…" : `Delete ${selectedCount} selected`}
             </button>
           )}
-          <Link href="/families/new" className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm">
+          <button
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="ml-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm disabled:opacity-40"
+          >
+            Export Excel
+          </button>
+          <Link href="/families/new" className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm">
             + New Family
           </Link>
         </div>

@@ -50,6 +50,8 @@ interface CellData {
   method: string | null;
   amount: number | null;
   notes: string | null;
+  charge?: number;      // expected charge for this month (0 if not elapsed yet)
+  isElapsed?: boolean;  // has this Hebrew month already started?
 }
 
 function formatDateShort(iso: string | null) {
@@ -68,6 +70,7 @@ export default function SpreadsheetPage() {
   const [rowData, setRowData] = useState<SpreadsheetRow[]>([]);
   const [months, setMonths] = useState<MonthMeta[]>([]);
   const [academicYear, setAcademicYear] = useState<number>(0);
+  const [totalStudents, setTotalStudents] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -82,6 +85,7 @@ export default function SpreadsheetPage() {
         setRowData(d.rows);
         setMonths(d.months);
         setAcademicYear(d.academicYear);
+        setTotalStudents(d.totalStudents ?? 0);
       })
       .catch(() => setError("Failed to load spreadsheet data"))
       .finally(() => setLoading(false));
@@ -227,7 +231,7 @@ export default function SpreadsheetPage() {
               const method = cell?.method;
               if (!method) return { color: "#d1d5db" };
               const colors: Record<string, string> = {
-                crc: "#1d4ed8", kas: "#15803d", bank: "#7e22ce", other: "#6b7280",
+                crc: "#1d4ed8", kas: "#15803d", bank: "#7e22ce", jj: "#b45309", other: "#6b7280",
               };
               return { color: colors[method] ?? "#374151", fontWeight: "600" };
             },
@@ -251,11 +255,17 @@ export default function SpreadsheetPage() {
             valueFormatter: (p) => p.value != null ? `€${Number(p.value).toLocaleString("nl-BE")}` : "",
             cellStyle: (p) => {
               const cell = p.data?.[key] as CellData;
-              const monthlyTuition = p.data?.monthlyTuition ?? 0;
+              const charge = cell?.charge ?? 0;
               const amount = cell?.amount ?? 0;
-              if (!monthlyTuition) return {};
+              const isElapsed = cell?.isElapsed ?? true;
+              // Future Hebrew months: not yet due — show neutral, no debt color
+              if (!isElapsed) {
+                if (amount > 0) return { backgroundColor: "#eff6ff", color: "#1d4ed8" }; // blue = pre-paid
+                return { color: "#d1d5db" };
+              }
+              if (charge <= 0) return {};
               if (!amount) return { backgroundColor: "#fef2f2", color: "#dc2626" }; // red = unpaid
-              if (amount >= monthlyTuition) return { backgroundColor: "#f0fdf4", color: "#16a34a" }; // green = paid
+              if (amount >= charge) return { backgroundColor: "#f0fdf4", color: "#16a34a" }; // green = paid
               return { backgroundColor: "#fefce8", color: "#ca8a04" }; // yellow = partial
             },
           },
@@ -353,6 +363,7 @@ export default function SpreadsheetPage() {
         </span>
         <span className="text-gray-400">|</span>
         <span className="text-gray-600">{rowData.length} families</span>
+        <span className="text-gray-600">{totalStudents} students</span>
         <span className="text-gray-600">Total paid: <strong className="text-green-700">€{totalPaidAll.toLocaleString("nl-BE")}</strong></span>
         <span className="text-gray-600">Total due: <strong className="text-red-600">€{totalDueAll.toLocaleString("nl-BE")}</strong></span>
 
