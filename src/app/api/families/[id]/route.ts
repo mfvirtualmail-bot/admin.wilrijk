@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { elapsedAcademicMonths } from "@/lib/hebrew-date";
+
+/** Academic-year index (0=Elul … 11=Av) for a Gregorian month number */
+function academicIdx(m: number) { return m >= 9 ? m - 9 : m + 3; }
+/** Gregorian start year of the academic year that contains this month+year */
+function chargeAcademicYear(month: number, year: number) { return month >= 9 ? year : year - 1; }
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -28,7 +34,16 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (familyRes.error || !familyRes.data)
     return NextResponse.json({ error: "Family not found" }, { status: 404 });
 
-  const totalCharged = (chargesRes.data ?? []).reduce((s, c) => s + Number(c.amount), 0);
+  // Only count charges for Hebrew months that have already started.
+  // Past academic years are always fully elapsed; the current year uses
+  // the real Hebrew calendar via elapsedAcademicMonths().
+  const elapsedCache: Record<number, number> = {};
+  const totalCharged = (chargesRes.data ?? []).reduce((s, c) => {
+    const ay = chargeAcademicYear(c.month, c.year);
+    if (!(ay in elapsedCache)) elapsedCache[ay] = elapsedAcademicMonths(ay);
+    const elapsed = elapsedCache[ay];
+    return academicIdx(c.month) < elapsed ? s + Number(c.amount) : s;
+  }, 0);
   const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
 
   return NextResponse.json({

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { hebrewMonthLabel } from "@/lib/hebrew-date";
+import { hebrewMonthLabel, elapsedAcademicMonths } from "@/lib/hebrew-date";
 
 const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
@@ -29,7 +29,10 @@ export async function GET() {
 
   const db = createServerClient();
   const academicYear = getAcademicYear();
-  const months = ACADEMIC_MONTHS.map((m) => monthYear(academicYear, m));
+  const allMonths = ACADEMIC_MONTHS.map((m) => monthYear(academicYear, m));
+  // Only include months that have already started (Rosh Chodesh rule)
+  const elapsed = elapsedAcademicMonths(academicYear);
+  const months = allMonths.slice(0, elapsed);
   const minYear = academicYear;
   const maxYear = academicYear + 1;
 

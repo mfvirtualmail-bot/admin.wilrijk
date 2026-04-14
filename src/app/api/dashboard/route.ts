@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { validateSession } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { elapsedAcademicMonths } from "@/lib/hebrew-date";
+
+function getAcademicYear(date = new Date()) {
+  const m = date.getMonth() + 1;
+  return m >= 9 ? date.getFullYear() : date.getFullYear() - 1;
+}
 
 export async function GET() {
   const token = cookies().get("session")?.value;
@@ -24,8 +30,9 @@ export async function GET() {
 
   const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
   const monthlyTuitionTotal = (chargesRes.data ?? []).reduce((s, c) => s + Number(c.monthly_tuition), 0);
-  // Academic months Sep → Aug = 12 months (אלול → אב)
-  const totalCharged = monthlyTuitionTotal * 12;
+  // Only multiply by months that have already started this Hebrew academic year
+  const elapsed = elapsedAcademicMonths(getAcademicYear());
+  const totalCharged = monthlyTuitionTotal * elapsed;
   const totalDue = Math.max(0, totalCharged - totalPaid);
 
   return NextResponse.json({
