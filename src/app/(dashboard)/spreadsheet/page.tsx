@@ -50,6 +50,8 @@ interface CellData {
   method: string | null;
   amount: number | null;
   notes: string | null;
+  charge?: number;      // expected charge for this month (0 if not elapsed yet)
+  isElapsed?: boolean;  // has this Hebrew month already started?
 }
 
 function formatDateShort(iso: string | null) {
@@ -253,11 +255,17 @@ export default function SpreadsheetPage() {
             valueFormatter: (p) => p.value != null ? `€${Number(p.value).toLocaleString("nl-BE")}` : "",
             cellStyle: (p) => {
               const cell = p.data?.[key] as CellData;
-              const monthlyTuition = p.data?.monthlyTuition ?? 0;
+              const charge = cell?.charge ?? 0;
               const amount = cell?.amount ?? 0;
-              if (!monthlyTuition) return {};
+              const isElapsed = cell?.isElapsed ?? true;
+              // Future Hebrew months: not yet due — show neutral, no debt color
+              if (!isElapsed) {
+                if (amount > 0) return { backgroundColor: "#eff6ff", color: "#1d4ed8" }; // blue = pre-paid
+                return { color: "#d1d5db" };
+              }
+              if (charge <= 0) return {};
               if (!amount) return { backgroundColor: "#fef2f2", color: "#dc2626" }; // red = unpaid
-              if (amount >= monthlyTuition) return { backgroundColor: "#f0fdf4", color: "#16a34a" }; // green = paid
+              if (amount >= charge) return { backgroundColor: "#f0fdf4", color: "#16a34a" }; // green = paid
               return { backgroundColor: "#fefce8", color: "#ca8a04" }; // yellow = partial
             },
           },

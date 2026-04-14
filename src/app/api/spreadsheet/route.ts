@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { hebrewMonthLabel } from "@/lib/hebrew-date";
+import { hebrewMonthLabel, elapsedAcademicMonths } from "@/lib/hebrew-date";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -48,7 +48,9 @@ export async function GET() {
   // Load all active families, their children, and relevant payments
   const [familiesRes, childrenRes, paymentsRes] = await Promise.all([
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
-    db.from("children").select("family_id, monthly_tuition").eq("is_active", true),
+    db.from("children")
+      .select("family_id, monthly_tuition, enrollment_start_month, enrollment_start_year, enrollment_end_month, enrollment_end_year")
+      .eq("is_active", true),
     db.from("payments")
       .select("id, family_id, amount, payment_date, payment_method, month, year, notes")
       .gte("year", minYear)
@@ -61,13 +63,56 @@ export async function GET() {
   const children = childrenRes.data ?? [];
   const payments = paymentsRes.data ?? [];
 
-  // Index monthly tuition and student count per family
-  const tuitionByFamily: Record<string, number> = {};
-  const studentCountByFamily: Record<string, number> = {};
-  for (const c of children) {
-    tuitionByFamily[c.family_id] = (tuitionByFamily[c.family_id] ?? 0) + Number(c.monthly_tuition);
-    studentCountByFamily[c.family_id] = (studentCountByFamily[c.family_id] ?? 0) + 1;
+  // How many academic months have already started (as of today, by Hebrew calendar)
+  const elapsedMonths = elapsedAcademicMonths(academicYear);
+
+  // Helper: academic-year position (0..11) for a Gregorian month in this year
+  const academicIndex = (m: number) => (m >= 9 ? m - 9 : m + 3);
+
+  // For each child, compute academic indexes where they are enrolled.
+  // enrollment_end_* being null means "ongoing / no end" (enrolled through end of year).
+  function childEnrollmentRange(c: {
+    enrollment_start_month: number | null;
+    enrollment_start_year: number | null;
+    enrollment_end_month: number | null;
+    enrollment_end_year: number | null;
+  }): { from: number; to: number } {
+    const sm = c.enrollment_start_month ?? 9;
+    const sy = c.enrollment_start_year ?? academicYear;
+    const em = c.enrollment_end_month;
+    const ey = c.enrollment_end_year;
+
+    // Convert month+year to an absolute "academic position" that can span years
+    const startPos = (sy - academicYear) * 12 + academicIndex(sm);
+    const endPos = em != null && ey != null ? (ey - academicYear) * 12 + academicIndex(em) : 11;
+    return { from: Math.max(0, startPos), to: Math.min(11, endPos) };
   }
+
+  // Index per-family tuition for each of the 12 academic months, respecting
+  // enrollment windows and the elapsed-months cap.
+  const familyMonthCharges: Record<string, number[]> = {};
+  const studentCountByFamily: Record<string, number> = {};
+  for (const fam of families) familyMonthCharges[fam.id] = new Array(12).fill(0);
+
+  for (const c of children) {
+    studentCountByFamily[c.family_id] = (studentCountByFamily[c.family_id] ?? 0) + 1;
+    const { from, to } = childEnrollmentRange(c);
+    const arr = familyMonthCharges[c.family_id];
+    if (!arr) continue;
+    for (let i = from; i <= to; i++) arr[i] += Number(c.monthly_tuition);
+  }
+
+  // tuitionByFamily = current per-month tuition (summed across active children,
+  // using their current enrollment window). Used to color cells in the grid.
+  const tuitionByFamily: Record<string, number> = {};
+  for (const fam of families) {
+    // Pick the tuition for the "current" month (last elapsed) as representative,
+    // falling back to month 0 if nothing elapsed yet.
+    const arr = familyMonthCharges[fam.id];
+    const curIdx = Math.max(0, Math.min(11, elapsedMonths - 1));
+    tuitionByFamily[fam.id] = arr[curIdx] ?? 0;
+  }
+
   const totalStudents = children.length;
 
   // Index payments by family+month+year (take the most recent if multiple)
@@ -83,21 +128,28 @@ export async function GET() {
   const rows = families.map((family) => {
     const monthlyTuition = tuitionByFamily[family.id] ?? 0;
     const studentCount = studentCountByFamily[family.id] ?? 0;
+    const perMonthCharges = familyMonthCharges[family.id] ?? new Array(12).fill(0);
     const monthData: Record<string, {
       paymentId: string | null;
       date: string | null;
       method: string | null;
       amount: number | null;
       notes: string | null;
+      charge: number;
+      isElapsed: boolean;
     }> = {};
 
     let totalPaid = 0;
     let totalCharged = 0;
 
-    for (const { month, year } of months) {
+    months.forEach(({ month, year }, idx) => {
       const key = `${family.id}:${month}:${year}`;
       const monthKey = `m_${month}_${year}`;
       const payment = paymentIndex[key] ?? null;
+
+      // Only count as charged if the Hebrew month has already started.
+      const isElapsed = idx < elapsedMonths;
+      const monthCharge = isElapsed ? perMonthCharges[idx] ?? 0 : 0;
 
       if (payment) {
         totalPaid += Number(payment.amount);
@@ -107,13 +159,19 @@ export async function GET() {
           method: payment.payment_method,
           amount: Number(payment.amount),
           notes: payment.notes,
+          charge: monthCharge,
+          isElapsed,
         };
       } else {
-        monthData[monthKey] = { paymentId: null, date: null, method: null, amount: null, notes: null };
+        monthData[monthKey] = {
+          paymentId: null, date: null, method: null, amount: null, notes: null,
+          charge: monthCharge,
+          isElapsed,
+        };
       }
 
-      if (monthlyTuition > 0) totalCharged += monthlyTuition;
-    }
+      totalCharged += monthCharge;
+    });
 
     return {
       familyId: family.id,
@@ -131,10 +189,12 @@ export async function GET() {
     rows,
     academicYear,
     totalStudents,
-    months: months.map((m) => ({
+    elapsedMonths,
+    months: months.map((m, idx) => ({
       ...m,
       key: `m_${m.month}_${m.year}`,
       hebrewLabel: hebrewMonthLabel(m.month, m.year),
+      isElapsed: idx < elapsedMonths,
     })),
   });
 }
