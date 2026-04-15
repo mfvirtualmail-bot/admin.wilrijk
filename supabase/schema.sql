@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS families (
   postal_code VARCHAR(20),
   phone VARCHAR(50),
   email VARCHAR(200),
+  language VARCHAR(5) NOT NULL DEFAULT 'en',  -- preferred language for emails: en, yi
   notes TEXT,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -143,6 +144,52 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX idx_audit_log_table ON audit_log(table_name);
 CREATE INDEX idx_audit_log_record ON audit_log(record_id);
 CREATE INDEX idx_audit_log_created ON audit_log(created_at);
+
+-- Email settings: singleton row (id=1). Stores SMTP credentials + org branding.
+CREATE TABLE IF NOT EXISTS email_settings (
+  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  smtp_host VARCHAR(200) NOT NULL DEFAULT 'smtp.gmail.com',
+  smtp_port INTEGER NOT NULL DEFAULT 465,
+  smtp_secure BOOLEAN NOT NULL DEFAULT TRUE,
+  smtp_user VARCHAR(200),
+  smtp_password TEXT,
+  from_name VARCHAR(200) NOT NULL DEFAULT 'Beit Midrash Wilrijk',
+  from_email VARCHAR(200),
+  reply_to VARCHAR(200),
+  bcc_admin VARCHAR(200),
+  org_name VARCHAR(200) NOT NULL DEFAULT 'Beit Midrash Wilrijk',
+  org_address TEXT,
+  org_logo_url TEXT,
+  payment_instructions TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO email_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Email templates: subject + body per language, with {{placeholders}}.
+CREATE TABLE IF NOT EXISTS email_templates (
+  locale VARCHAR(5) PRIMARY KEY,
+  subject VARCHAR(500) NOT NULL,
+  body TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Email send log for audit + debugging.
+CREATE TABLE IF NOT EXISTS email_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  family_id UUID REFERENCES families(id) ON DELETE SET NULL,
+  to_email VARCHAR(200) NOT NULL,
+  subject VARCHAR(500) NOT NULL,
+  locale VARCHAR(5) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  error TEXT,
+  sent_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  balance_at_send DECIMAL(10,2),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_log_family ON email_log(family_id);
+CREATE INDEX IF NOT EXISTS idx_email_log_created ON email_log(created_at);
 
 -- Seed: default super admin (password: "admin123" — change immediately)
 -- Salt and hash generated with PBKDF2-SHA512, 100000 iterations

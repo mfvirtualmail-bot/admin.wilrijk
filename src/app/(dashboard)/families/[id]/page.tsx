@@ -287,15 +287,26 @@ export default function FamilyDetailPage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold text-gray-900">{familyDisplayName(family.name, family.father_name)}</h2>
-            {canEdit && !editMode && (
-              <div className="flex gap-3 items-center">
-                <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
-                <button onClick={handleDeleteFamily} disabled={deletingFamily}
-                  className="text-sm text-red-500 hover:text-red-700 disabled:opacity-40">
-                  {deletingFamily ? "Deleting…" : "Delete Family"}
-                </button>
-              </div>
-            )}
+            <div className="flex gap-3 items-center">
+              {family.email && (
+                <Link
+                  href={`/emails?preview=${family.id}`}
+                  className="text-sm text-green-700 hover:underline"
+                  title="Preview + send a statement for this family"
+                >
+                  ✉ Send statement
+                </Link>
+              )}
+              {canEdit && !editMode && (
+                <>
+                  <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 hover:underline">Edit</button>
+                  <button onClick={handleDeleteFamily} disabled={deletingFamily}
+                    className="text-sm text-red-500 hover:text-red-700 disabled:opacity-40">
+                    {deletingFamily ? "Deleting…" : "Delete Family"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {!editMode ? (
@@ -305,6 +316,7 @@ export default function FamilyDetailPage() {
                 ["Hebrew Name", family.hebrew_name], ["Hebrew Father", family.hebrew_father_name],
                 ["Phone", family.phone], ["Email", family.email],
                 ["Address", family.address], ["City", `${family.city ?? ""} ${family.postal_code ?? ""}`.trim()],
+                ["Email language", family.language === "yi" ? "Yiddish" : "English"],
                 ["Notes", family.notes],
               ].map(([label, val]) => val ? (
                 <div key={label as string}><span className="text-gray-500">{label}:</span> <span className="text-gray-900">{val}</span></div>
@@ -327,6 +339,17 @@ export default function FamilyDetailPage() {
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 ))}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Email language</label>
+                <select
+                  value={(form.language as string) ?? "en"}
+                  onChange={(e) => setForm((p) => ({ ...p, language: e.target.value as "en" | "yi" }))}
+                  className="w-60 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="en">English</option>
+                  <option value="yi">ייִדיש (Yiddish)</option>
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
