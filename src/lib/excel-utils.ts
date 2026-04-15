@@ -46,15 +46,22 @@ export interface PaymentMonthGroup {
 export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
   const xlsx = await import("xlsx");
   const buffer = await file.arrayBuffer();
+  // cellDates: true converts Excel date-serial cells into JS Date objects.
   const wb = xlsx.read(buffer, { type: "array", cellDates: true });
 
   function getSheet(name: string): ParsedSheet {
     const ws = wb.Sheets[name];
     if (!ws) return { headers: [], rows: [] };
+    // raw: true preserves the underlying cell type — Date objects for dates,
+    // numbers for numerics, strings for text. This is critical for dates:
+    // if xlsx formats a date cell as a string (raw:false) it uses the
+    // workbook's own locale/format (often MM/DD/YY), which would then be
+    // incorrectly re-parsed as DD-MM-YY (swapping day and month). Keeping
+    // Date objects lets parseEuropeanDate read day/month/year unambiguously.
     const data = xlsx.utils.sheet_to_json<unknown[]>(ws, {
       header: 1,
       defval: "",
-      raw: false,   // format numbers/dates as strings
+      raw: true,
     }) as unknown[][];
 
     if (data.length === 0) return { headers: [], rows: [] };
@@ -235,19 +242,52 @@ export function suggestPaymentMappings(
 // Data conversion helpers
 // ──────────────────────────────────────────────
 
+/** Format a JS Date as ISO YYYY-MM-DD using local fields (no UTC shift). */
+function formatLocalISODate(d: Date): string | null {
+  if (isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 /**
- * Parse a European date string (DD-MM-YY or DD-MM-YYYY or DD/MM/YYYY) to ISO date.
+ * Parse a date from a variety of sources into ISO (YYYY-MM-DD):
+ *   - JS Date objects (from xlsx cellDates)
+ *   - Excel date serial numbers
+ *   - ISO strings YYYY-MM-DD
+ *   - European strings DD-MM-YY / DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY
+ *
+ * The user's data uses DD-MM-YY. Ambiguous US-style strings are NOT
+ * supported: we always treat two leading digits as the day, never the month.
+ *
  * Returns null if parsing fails.
  */
 export function parseEuropeanDate(raw: unknown): string | null {
-  if (!raw) return null;
+  if (raw == null || raw === "") return null;
+
+  // xlsx with cellDates: true hands us Date objects for date cells.
+  if (raw instanceof Date) return formatLocalISODate(raw);
+
+  // Excel stores dates as serial numbers (days since 1899-12-30).
+  if (typeof raw === "number" && isFinite(raw)) {
+    const epoch = Date.UTC(1899, 11, 30);
+    const d = new Date(epoch + raw * 86400000);
+    // Use UTC fields since we built the date from a UTC epoch offset.
+    if (isNaN(d.getTime())) return null;
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
   const s = String(raw).trim();
   if (!s) return null;
 
   // Already ISO format YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // DD-MM-YY or DD-MM-YYYY or DD/MM/YYYY
+  // DD-MM-YY or DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
   const match = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (!match) return null;
   const [, d, m, y] = match;
@@ -357,11 +397,18 @@ export function processFamilyRows(
 
   rows.forEach((row, rowIdx) => {
     const excelRow = rowIdx + 2; // +1 for header, +1 for 1-based
-    const get = (key: string): string => {
+    const getRaw = (key: string): unknown => {
       const col = Object.entries(mappings).find(([, v]) => v === key)?.[0];
-      if (col == null) return "";
-      const val = row[parseInt(col)];
-      return val == null ? "" : String(val).trim();
+      if (col == null) return null;
+      return row[parseInt(col)];
+    };
+    const get = (key: string): string => {
+      const val = getRaw(key);
+      if (val == null) return "";
+      // Preserve JS Date objects as a parseable string only if a caller
+      // asks explicitly; here we only stringify for text fields.
+      if (val instanceof Date) return formatLocalISODate(val) ?? "";
+      return String(val).trim();
     };
 
     const familyName = get("family_name");
@@ -412,8 +459,9 @@ export function processFamilyRows(
     if (childFirstName) {
       const lastName = get("child_last_name") || familyName;
       const hebrewName = get("child_hebrew_name") || null;
-      const dob = parseEuropeanDate(get("child_dob"));
-      const tuition = parseAmount(get("monthly_tuition")) ?? 0;
+      // Pass raw so Date objects / Excel serials parse unambiguously.
+      const dob = parseEuropeanDate(getRaw("child_dob"));
+      const tuition = parseAmount(getRaw("monthly_tuition")) ?? 0;
       const rijks = get("rijksregister");
 
       family.children.push({

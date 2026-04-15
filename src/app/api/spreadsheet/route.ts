@@ -45,12 +45,16 @@ export async function GET() {
   const minYear = academicYear;
   const maxYear = academicYear + 1;
 
-  // Load all active families, their children, and relevant payments
-  const [familiesRes, childrenRes, paymentsRes] = await Promise.all([
+  // Load all active families, their children, relevant payments, and charges
+  const [familiesRes, childrenRes, paymentsRes, chargesRes] = await Promise.all([
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
     db.from("children").select("family_id, monthly_tuition").eq("is_active", true),
     db.from("payments")
       .select("id, family_id, amount, payment_date, payment_method, month, year, notes")
+      .gte("year", minYear)
+      .lte("year", maxYear),
+    db.from("charges")
+      .select("family_id, amount, month, year")
       .gte("year", minYear)
       .lte("year", maxYear),
   ]);
@@ -60,11 +64,20 @@ export async function GET() {
   const families = familiesRes.data ?? [];
   const children = childrenRes.data ?? [];
   const payments = paymentsRes.data ?? [];
+  const charges = chargesRes.data ?? [];
 
-  // Index monthly tuition per family
+  // Index monthly tuition per family (for the "monthly tuition" column)
   const tuitionByFamily: Record<string, number> = {};
   for (const c of children) {
     tuitionByFamily[c.family_id] = (tuitionByFamily[c.family_id] ?? 0) + Number(c.monthly_tuition);
+  }
+
+  // Index charges by family+month+year so we know which families are
+  // actually billed for each month (respects enrollment windows).
+  const chargesByFamilyMonth: Record<string, number> = {};
+  for (const c of charges) {
+    const key = `${c.family_id}:${c.month}:${c.year}`;
+    chargesByFamilyMonth[key] = (chargesByFamilyMonth[key] ?? 0) + Number(c.amount);
   }
 
   // Index payments by family+month+year (take the most recent if multiple)
@@ -75,6 +88,11 @@ export async function GET() {
       paymentIndex[key] = p;
     }
   }
+
+  // Only count charges for months that have already started. Future
+  // months are not yet owed; months before enrollment were never charged.
+  const now = new Date();
+  const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
 
   // Build row data
   const rows = families.map((family) => {
@@ -108,7 +126,10 @@ export async function GET() {
         monthData[monthKey] = { paymentId: null, date: null, method: null, amount: null, notes: null };
       }
 
-      if (monthlyTuition > 0) totalCharged += monthlyTuition;
+      const monthPastOrCurrent = year * 12 + month <= currentKey;
+      if (monthPastOrCurrent) {
+        totalCharged += chargesByFamilyMonth[key] ?? 0;
+      }
     }
 
     return {

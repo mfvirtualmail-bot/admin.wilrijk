@@ -11,11 +11,12 @@ export async function GET() {
 
   const db = createServerClient();
 
-  const [familiesRes, childrenRes, paymentsRes, chargesRes, recentPaymentsRes] = await Promise.all([
+  const [familiesRes, childrenRes, paymentsRes, tuitionRes, chargesRes, recentPaymentsRes] = await Promise.all([
     db.from("families").select("id", { count: "exact" }).eq("is_active", true),
     db.from("children").select("id", { count: "exact" }).eq("is_active", true),
     db.from("payments").select("amount"),
     db.from("children").select("monthly_tuition").eq("is_active", true),
+    db.from("charges").select("amount, month, year"),
     db.from("payments")
       .select("id, amount, payment_date, payment_method, currency, families(name, father_name)")
       .order("payment_date", { ascending: false })
@@ -23,9 +24,19 @@ export async function GET() {
   ]);
 
   const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
-  const monthlyTuitionTotal = (chargesRes.data ?? []).reduce((s, c) => s + Number(c.monthly_tuition), 0);
-  // Academic months Sep → Aug = 12 months (אלול → אב)
-  const totalCharged = monthlyTuitionTotal * 12;
+  const monthlyTuitionTotal = (tuitionRes.data ?? []).reduce(
+    (s, c) => s + Number(c.monthly_tuition),
+    0,
+  );
+  // Only count charges for months that have already started. Enrollment
+  // is already baked into the charges table (see generateChargesForChild),
+  // so this one filter covers both "month hasn't arrived" and "student
+  // wasn't enrolled yet / has left" cases.
+  const now = new Date();
+  const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
+  const totalCharged = (chargesRes.data ?? [])
+    .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey)
+    .reduce((s, c) => s + Number(c.amount), 0);
   const totalDue = Math.max(0, totalCharged - totalPaid);
 
   return NextResponse.json({
