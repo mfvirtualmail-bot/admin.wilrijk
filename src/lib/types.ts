@@ -31,6 +31,7 @@ export interface Family {
   postal_code: string | null;
   phone: string | null;
   email: string | null;
+  language: "en" | "yi";
   notes: string | null;
   is_active: boolean;
   created_at: string;
@@ -105,9 +106,10 @@ export type PermissionModule =
   | "spreadsheet"
   | "reports"
   | "users"
-  | "settings";
+  | "settings"
+  | "email";
 
-export type PermissionAction = "view" | "add" | "edit" | "delete";
+export type PermissionAction = "view" | "add" | "edit" | "delete" | "send";
 
 export const ALL_MODULES: PermissionModule[] = [
   "families",
@@ -118,9 +120,10 @@ export const ALL_MODULES: PermissionModule[] = [
   "reports",
   "users",
   "settings",
+  "email",
 ];
 
-export const ALL_ACTIONS: PermissionAction[] = ["view", "add", "edit", "delete"];
+export const ALL_ACTIONS: PermissionAction[] = ["view", "add", "edit", "delete", "send"];
 
 export const MODULE_ACTIONS: Record<PermissionModule, PermissionAction[]> = {
   families: ["view", "add", "edit", "delete"],
@@ -131,4 +134,44 @@ export const MODULE_ACTIONS: Record<PermissionModule, PermissionAction[]> = {
   reports: ["view"],
   users: ["view", "add", "edit", "delete"],
   settings: ["view", "edit"],
+  email: ["send"],
 };
+
+// Email-related types
+export interface EmailSettings {
+  id: number;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_secure: boolean;
+  smtp_user: string | null;
+  smtp_password: string | null; // never returned to the browser
+  from_name: string;
+  from_email: string | null;
+  reply_to: string | null;
+  bcc_admin: string | null;
+  org_name: string;
+  org_address: string | null;
+  org_logo_url: string | null;
+  payment_instructions: string | null;
+  updated_at: string;
+}
+
+export interface EmailTemplate {
+  locale: "en" | "yi";
+  subject: string;
+  body: string;
+  updated_at: string;
+}
+
+export interface EmailLogEntry {
+  id: string;
+  family_id: string | null;
+  to_email: string;
+  subject: string;
+  locale: string;
+  status: "sent" | "failed" | "test";
+  error: string | null;
+  sent_by: string | null;
+  balance_at_send: number | null;
+  created_at: string;
+}

@@ -20,14 +20,19 @@ const mainNav: NavItem[] = [
   { href: "/reports", labelKey: "nav.reports", icon: "📈" },
 ];
 
+const emailNav: NavItem = { href: "/emails", labelKey: "nav.emails", icon: "✉️" };
+
 const adminNav: NavItem[] = [
   { href: "/admin/users", labelKey: "nav.users", icon: "👤" },
+  { href: "/settings/email", labelKey: "nav.email_settings", icon: "📧" },
+  { href: "/settings/email-templates", labelKey: "nav.email_templates", icon: "📝" },
   { href: "/settings", labelKey: "nav.settings", icon: "⚙️" },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { user, locale, logout } = useAuth();
+  const { user, locale, logout, can } = useAuth();
+  const canSendEmail = can("email", "send");
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -56,6 +61,20 @@ export default function Sidebar() {
             <span>{t(locale, item.labelKey)}</span>
           </Link>
         ))}
+
+        {canSendEmail && (
+          <Link
+            href={emailNav.href}
+            className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              isActive(emailNav.href)
+                ? "bg-blue-600 text-white"
+                : "text-gray-300 hover:bg-gray-800 hover:text-white"
+            }`}
+          >
+            <span>{emailNav.icon}</span>
+            <span>{t(locale, emailNav.labelKey)}</span>
+          </Link>
+        )}
 
         {user?.is_super_admin && (
           <>
