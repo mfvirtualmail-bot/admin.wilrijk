@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, METHOD_COLORS, CURRENCY_OPTIONS, formatDate, formatCurrency } from "@/lib/payment-utils";
+import { METHOD_COLORS, CURRENCY_OPTIONS, CURRENCY_SYMBOLS, formatDate, formatCurrency } from "@/lib/payment-utils";
+import { usePaymentMethods } from "@/lib/use-settings";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import { familyDisplayName } from "@/lib/family-utils";
 import type { Family, Child, Payment, PaymentMethod, Currency } from "@/lib/types";
@@ -36,6 +37,7 @@ export default function FamilyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
+  const { methodLabels } = usePaymentMethods();
   const [data, setData] = useState<FamilyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -70,7 +72,8 @@ export default function FamilyDetailPage() {
   // Add payment form
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [payForm, setPayForm] = useState({
-    amount: "", payment_date: new Date().toISOString().slice(0, 10),
+    amount: "", currency: "EUR" as Currency,
+    payment_date: new Date().toISOString().slice(0, 10),
     payment_method: "kas" as PaymentMethod, month: "", year: "", notes: "",
     allocate: true,
   });
@@ -220,6 +223,7 @@ export default function FamilyDetailPage() {
     setSavingPayment(true);
     const body: Record<string, unknown> = {
       family_id: id, amount: Number(payForm.amount),
+      currency: payForm.currency,
       payment_date: payForm.payment_date, payment_method: payForm.payment_method,
       notes: payForm.notes.trim() || null,
     };
@@ -566,10 +570,21 @@ export default function FamilyDetailPage() {
             <form onSubmit={handleAddPayment} className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount *</label>
-                  <input type="number" value={payForm.amount} onChange={(e) => setPayForm((p) => ({ ...p, amount: e.target.value }))}
-                    min="0.01" step="0.01" required placeholder="0.00"
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Amount ({CURRENCY_SYMBOLS[payForm.currency]}) *
+                  </label>
+                  <div className="flex gap-1">
+                    <select value={payForm.currency}
+                      onChange={(e) => setPayForm((p) => ({ ...p, currency: e.target.value as Currency }))}
+                      className="w-20 px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {CURRENCY_OPTIONS.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label.split(" ")[0]}</option>
+                      ))}
+                    </select>
+                    <input type="number" value={payForm.amount} onChange={(e) => setPayForm((p) => ({ ...p, amount: e.target.value }))}
+                      min="0.01" step="0.01" required placeholder="0.00"
+                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Date *</label>
@@ -578,10 +593,10 @@ export default function FamilyDetailPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Method *</label>
-                  <select value={payForm.payment_method} onChange={(e) => setPayForm((p) => ({ ...p, payment_method: e.target.value as PaymentMethod }))}
+                  <select value={payForm.payment_method} onChange={(e) => setPayForm((p) => ({ ...p, payment_method: e.target.value }))}
                     className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {(Object.keys(METHOD_LABELS) as PaymentMethod[]).map((m) => (
-                      <option key={m} value={m}>{METHOD_LABELS[m]}</option>
+                    {Object.keys(methodLabels).map((m) => (
+                      <option key={m} value={m}>{methodLabels[m]}</option>
                     ))}
                   </select>
                 </div>
@@ -651,8 +666,8 @@ export default function FamilyDetailPage() {
                   <tr key={p.id} className="hover:bg-gray-50">
                     <td className="py-2 text-gray-700">{formatDate(p.payment_date)}</td>
                     <td className="py-2">
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${METHOD_COLORS[p.payment_method]}`}>
-                        {METHOD_LABELS[p.payment_method]}
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${METHOD_COLORS[p.payment_method] ?? "bg-gray-100 text-gray-700"}`}>
+                        {methodLabels[p.payment_method] ?? p.payment_method}
                       </span>
                     </td>
                     <td className="py-2 text-gray-600" dir={p.month && p.year ? "rtl" : undefined}>

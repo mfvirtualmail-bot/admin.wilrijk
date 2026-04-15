@@ -15,13 +15,17 @@ interface AuditEntry {
   users: { username: string; display_name: string | null } | null;
 }
 
-const METHOD_KEYS = ["crc", "kas", "bank", "other"];
+/** Built-in method keys that cannot be deleted, only relabelled. */
+const BUILTIN_METHOD_KEYS = ["crc", "kas", "bank", "other"] as const;
 const DEFAULT_METHOD_LABELS: Record<string, string> = {
   crc: "Credit Card",
   kas: "Cash",
   bank: "Bank Transfer",
   other: "Other",
 };
+/** Only lowercase letters, digits and underscore — this ends up stored as
+ * the raw payment_method value in the DB, so keep it short and stable. */
+const METHOD_KEY_RE = /^[a-z0-9_]{1,20}$/;
 const TABLE_OPTIONS = ["", "families", "children", "payments", "users", "settings"];
 
 export default function SettingsPage() {
@@ -35,6 +39,10 @@ export default function SettingsPage() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState("");
+
+  // New-method input
+  const [newMethodKey, setNewMethodKey] = useState("");
+  const [newMethodLabel, setNewMethodLabel] = useState("");
 
   // Audit log state
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
@@ -142,20 +150,103 @@ export default function SettingsPage() {
 
                 {/* Payment method labels */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method Labels</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    {METHOD_KEYS.map((key) => (
-                      <div key={key} className="flex items-center gap-2">
-                        <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-600 w-12 text-center">{key}</span>
-                        <input
-                          type="text"
-                          value={methodLabels[key] ?? ""}
-                          onChange={(e) => setMethodLabels((p) => ({ ...p, [key]: e.target.value }))}
-                          className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                    ))}
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment Methods</label>
+                  <p className="text-xs text-gray-500 mb-3">
+                    The four codes <code className="font-mono bg-gray-100 px-1 rounded">crc</code>,
+                    <code className="font-mono bg-gray-100 px-1 rounded">kas</code>,
+                    <code className="font-mono bg-gray-100 px-1 rounded">bank</code> and
+                    <code className="font-mono bg-gray-100 px-1 rounded">other</code> are built-in and
+                    cannot be removed, only renamed. You can add your own codes below.
+                  </p>
+                  <div className="space-y-2">
+                    {Object.keys(methodLabels).map((key) => {
+                      const isBuiltin = (BUILTIN_METHOD_KEYS as readonly string[]).includes(key);
+                      return (
+                        <div key={key} className="flex items-center gap-2">
+                          <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-600 w-20 text-center shrink-0">
+                            {key}
+                          </span>
+                          <input
+                            type="text"
+                            value={methodLabels[key] ?? ""}
+                            onChange={(e) => setMethodLabels((p) => ({ ...p, [key]: e.target.value }))}
+                            placeholder="Label shown in forms"
+                            className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          {isBuiltin ? (
+                            <span className="text-[11px] text-gray-400 w-16 text-right">built-in</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMethodLabels((prev) => {
+                                  const next = { ...prev };
+                                  delete next[key];
+                                  return next;
+                                });
+                                if (defaultMethod === key) setDefaultMethod("kas");
+                              }}
+                              className="text-xs text-red-500 hover:text-red-700 w-16 text-right"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
+
+                  {/* Add new method row */}
+                  <div className="mt-3 p-3 border border-dashed border-gray-300 rounded-md bg-gray-50 flex items-end gap-2 flex-wrap">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Code</label>
+                      <input
+                        type="text"
+                        value={newMethodKey}
+                        onChange={(e) => setNewMethodKey(e.target.value.toLowerCase())}
+                        placeholder="e.g. paypal"
+                        maxLength={20}
+                        className="w-32 px-3 py-1.5 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-[12rem]">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Label</label>
+                      <input
+                        type="text"
+                        value={newMethodLabel}
+                        onChange={(e) => setNewMethodLabel(e.target.value)}
+                        placeholder="PayPal"
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        !METHOD_KEY_RE.test(newMethodKey) ||
+                        !newMethodLabel.trim() ||
+                        newMethodKey in methodLabels
+                      }
+                      onClick={() => {
+                        setMethodLabels((prev) => ({
+                          ...prev,
+                          [newMethodKey]: newMethodLabel.trim(),
+                        }));
+                        setNewMethodKey("");
+                        setNewMethodLabel("");
+                      }}
+                      className="px-3 py-1.5 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 disabled:opacity-40"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                  {newMethodKey && !METHOD_KEY_RE.test(newMethodKey) && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Code must be 1–20 lowercase letters, digits or underscores.
+                    </p>
+                  )}
+                  {newMethodKey && newMethodKey in methodLabels && (
+                    <p className="text-xs text-red-500 mt-1">That code already exists.</p>
+                  )}
                 </div>
 
                 {/* Default payment method */}
@@ -164,9 +255,9 @@ export default function SettingsPage() {
                   <select
                     value={defaultMethod}
                     onChange={(e) => setDefaultMethod(e.target.value)}
-                    className="w-48 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-60 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {METHOD_KEYS.map((key) => (
+                    {Object.keys(methodLabels).map((key) => (
                       <option key={key} value={key}>{methodLabels[key] ?? key} ({key})</option>
                     ))}
                   </select>

@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
-import { METHOD_LABELS } from "@/lib/payment-utils";
+import { CURRENCY_OPTIONS, CURRENCY_SYMBOLS } from "@/lib/payment-utils";
+import { usePaymentMethods } from "@/lib/use-settings";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
-import type { Family, PaymentMethod } from "@/lib/types";
+import type { Family, PaymentMethod, Currency } from "@/lib/types";
 
 // Academic year months: Sep → Aug (אלול → אב)
 const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
@@ -28,11 +29,19 @@ export default function NewPaymentPage() {
   const searchParams = useSearchParams();
   const preselectedFamilyId = searchParams.get("family_id") ?? "";
 
+  const { methodLabels, defaultMethod } = usePaymentMethods();
   const [families, setFamilies] = useState<Family[]>([]);
   const [familyId, setFamilyId] = useState(preselectedFamilyId);
   const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState<Currency>("EUR");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState<PaymentMethod>("kas");
+
+  // Sync with the configured default once settings load (if the user
+  // hasn't already picked something).
+  useEffect(() => {
+    setMethod((m) => (m === "kas" ? defaultMethod : m));
+  }, [defaultMethod]);
   const [month, setMonth] = useState<string>("");
   const [year, setYear] = useState<string>("");
   const [allocateMonth, setAllocateMonth] = useState(true);
@@ -92,6 +101,7 @@ export default function NewPaymentPage() {
     const body: Record<string, unknown> = {
       family_id: familyId,
       amount: Number(amount),
+      currency,
       payment_date: paymentDate,
       payment_method: method,
       notes: notes.trim() || null,
@@ -139,12 +149,22 @@ export default function NewPaymentPage() {
               </select>
             </div>
 
-            {/* Amount */}
+            {/* Amount + currency */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (€) <span className="text-red-500">*</span></label>
-              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
-                min="0.01" step="0.01" required placeholder="0.00"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount ({CURRENCY_SYMBOLS[currency]}) <span className="text-red-500">*</span>
+              </label>
+              <div className="flex gap-2">
+                <select value={currency} onChange={(e) => setCurrency(e.target.value as Currency)}
+                  className="w-28 px-2 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                  {CURRENCY_OPTIONS.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+                <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+                  min="0.01" step="0.01" required placeholder="0.00"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+              </div>
             </div>
 
             {/* Date */}
@@ -157,10 +177,10 @@ export default function NewPaymentPage() {
             {/* Method dropdown */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method <span className="text-red-500">*</span></label>
-              <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} required
+              <select value={method} onChange={(e) => setMethod(e.target.value)} required
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-                {(Object.keys(METHOD_LABELS) as PaymentMethod[]).map((m) => (
-                  <option key={m} value={m}>{METHOD_LABELS[m]}</option>
+                {Object.keys(methodLabels).map((m) => (
+                  <option key={m} value={m}>{methodLabels[m]}</option>
                 ))}
               </select>
             </div>

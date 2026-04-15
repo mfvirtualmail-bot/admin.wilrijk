@@ -11,7 +11,9 @@ import {
   type PaymentMonthGroup,
   type ImportPayment,
 } from "@/lib/excel-utils";
-import { ACADEMIC_MONTHS } from "@/lib/payment-utils";
+import { ACADEMIC_MONTHS, CURRENCY_OPTIONS, CURRENCY_SYMBOLS } from "@/lib/payment-utils";
+import { usePaymentMethods } from "@/lib/use-settings";
+import type { Currency } from "@/lib/types";
 
 type WizardStep = "upload" | "map" | "match" | "preview" | "importing" | "done";
 
@@ -35,8 +37,10 @@ function buildMonthOptions(academicYear: number) {
 
 
 export default function PaymentsImportPage() {
+  const { methodLabels } = usePaymentMethods();
   const [step, setStep] = useState<WizardStep>("upload");
   const [academicYear, setAcademicYear] = useState(defaultAcademicYear());
+  const [currency, setCurrency] = useState<Currency>("EUR");
 
   // Excel parse result
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -194,7 +198,7 @@ export default function PaymentsImportPage() {
       const res = await fetch("/api/payments/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payments: resolvedPayments }),
+        body: JSON.stringify({ payments: resolvedPayments, currency }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -260,22 +264,40 @@ export default function PaymentsImportPage() {
           {/* ── STEP 1: UPLOAD ── */}
           {step === "upload" && (
             <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Academic Year</label>
-                <select
-                  value={academicYear}
-                  onChange={(e) => setAcademicYear(Number(e.target.value))}
-                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {buildYearOptions().map((y) => (
-                    <option key={y} value={y}>
-                      {y}/{y + 1}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  The academic year the payments in this file belong to.
-                </p>
+              <div className="flex flex-wrap gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Academic Year</label>
+                  <select
+                    value={academicYear}
+                    onChange={(e) => setAcademicYear(Number(e.target.value))}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {buildYearOptions().map((y) => (
+                      <option key={y} value={y}>
+                        {y}/{y + 1}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    The academic year the payments in this file belong to.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Currency</label>
+                  <select
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value as Currency)}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    All payments in this file will be recorded in this currency.
+                  </p>
+                </div>
               </div>
 
               <div>
@@ -647,11 +669,11 @@ export default function PaymentsImportPage() {
                             </td>
                             <td className="px-4 py-2">
                               <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
-                                {p.payment_method}
+                                {methodLabels[p.payment_method] ?? p.payment_method}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right font-semibold text-gray-900">
-                              €{p.amount.toFixed(2)}
+                              {CURRENCY_SYMBOLS[currency]}{p.amount.toFixed(2)}
                             </td>
                             <td className="px-4 py-2">
                               {matched ? (
