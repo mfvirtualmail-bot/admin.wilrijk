@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
+import { exportSheet, dateStampedFilename } from "@/lib/export-utils";
 import type { Family } from "@/lib/types";
 
 export default function FamiliesPage() {
@@ -104,6 +105,28 @@ export default function FamiliesPage() {
     }
   }
 
+  async function handleExport() {
+    const headers = [
+      "Family Name", "Father", "Mother", "Hebrew Name", "Hebrew Father",
+      "Phone", "Email", "Address", "City", "Postal Code", "Notes", "Status",
+    ];
+    const rows = filtered.map((f) => [
+      f.name,
+      f.father_name ?? "",
+      f.mother_name ?? "",
+      f.hebrew_name ?? "",
+      f.hebrew_father_name ?? "",
+      f.phone ?? "",
+      f.email ?? "",
+      f.address ?? "",
+      f.city ?? "",
+      f.postal_code ?? "",
+      f.notes ?? "",
+      f.is_active ? "Active" : "Inactive",
+    ]);
+    await exportSheet(dateStampedFilename("families"), "Families", headers, rows);
+  }
+
   const colCount = canDelete ? 8 : 6;
 
   return (
@@ -120,6 +143,13 @@ export default function FamiliesPage() {
             className="flex-1 max-w-sm px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <span className="text-sm text-gray-500">{filtered.length} families</span>
+          <button
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm disabled:opacity-40"
+          >
+            Export Excel
+          </button>
           {canDelete && selectedCount > 0 && (
             <button
               onClick={handleBulkDelete}

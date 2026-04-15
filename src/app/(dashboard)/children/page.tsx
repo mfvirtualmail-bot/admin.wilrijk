@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
 import { formatEur } from "@/lib/payment-utils";
 import { familyDisplayName } from "@/lib/family-utils";
+import { exportSheet, dateStampedFilename } from "@/lib/export-utils";
 
 interface ChildRow {
   id: string;
@@ -113,6 +114,19 @@ export default function ChildrenPage() {
     }
   }
 
+  async function handleExport() {
+    const headers = ["First Name", "Last Name", "Family", "Class", "Monthly Tuition (EUR)", "Status"];
+    const rows = filtered.map((c) => [
+      c.first_name,
+      c.last_name,
+      c.families ? familyDisplayName(c.families.name, c.families.father_name) : "",
+      c.class_name ?? "",
+      Number(c.monthly_tuition),
+      c.is_active ? "Active" : "Inactive",
+    ]);
+    await exportSheet(dateStampedFilename("students"), "Students", headers, rows);
+  }
+
   const colCount = canDelete ? 7 : 5;
 
   return (
@@ -125,6 +139,13 @@ export default function ChildrenPage() {
             className="flex-1 max-w-xs px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <span className="text-sm text-gray-500">{filtered.length} students</span>
           <span className="text-sm font-semibold text-gray-700">Monthly total: {formatEur(totalMonthly)}</span>
+          <button
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm disabled:opacity-40"
+          >
+            Export Excel
+          </button>
           {canDelete && selectedCount > 0 && (
             <button
               onClick={handleBulkDelete}

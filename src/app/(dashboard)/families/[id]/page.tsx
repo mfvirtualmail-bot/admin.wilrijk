@@ -5,9 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, METHOD_COLORS, CURRENCY_OPTIONS, formatDate, formatCurrency } from "@/lib/payment-utils";
+import { METHOD_LABELS, METHOD_COLORS, MONTHS, CURRENCY_OPTIONS, formatDate, formatCurrency } from "@/lib/payment-utils";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import { familyDisplayName } from "@/lib/family-utils";
+import { exportWorkbook, dateStampedFilename } from "@/lib/export-utils";
 import type { Family, Child, Payment, PaymentMethod, Currency } from "@/lib/types";
 
 interface FamilyData {
@@ -253,6 +254,60 @@ export default function FamilyDetailPage() {
   const baseYear = new Date().getMonth() + 1 >= 9 ? currentYear : currentYear - 1;
   const monthOptions = academicMonthOptions(baseYear);
 
+  async function handleExport() {
+    if (!data) return;
+    const { family, children, payments, balance } = data;
+    const infoSheet = {
+      name: "Family Info",
+      headers: ["Field", "Value"],
+      rows: [
+        ["Family Name", family.name],
+        ["Father", family.father_name ?? ""],
+        ["Mother", family.mother_name ?? ""],
+        ["Hebrew Name", family.hebrew_name ?? ""],
+        ["Hebrew Father", family.hebrew_father_name ?? ""],
+        ["Phone", family.phone ?? ""],
+        ["Email", family.email ?? ""],
+        ["Address", family.address ?? ""],
+        ["City", family.city ?? ""],
+        ["Postal Code", family.postal_code ?? ""],
+        ["Notes", family.notes ?? ""],
+        ["Status", family.is_active ? "Active" : "Inactive"],
+        ["Total Charged", balance.charged],
+        ["Total Paid", balance.paid],
+        ["Balance Due", balance.due],
+      ] as unknown[][],
+    };
+    const studentsSheet = {
+      name: "Students",
+      headers: ["First Name", "Last Name", "Hebrew Name", "Class", "Monthly Tuition", "Currency", "Status"],
+      rows: children.map((c) => [
+        c.first_name,
+        c.last_name,
+        c.hebrew_name ?? "",
+        c.class_name ?? "",
+        Number(c.monthly_tuition),
+        c.currency ?? "EUR",
+        c.is_active ? "Active" : "Inactive",
+      ]) as unknown[][],
+    };
+    const paymentsSheet = {
+      name: "Payments",
+      headers: ["Date", "Method", "Month", "Year", "Amount", "Currency", "Notes"],
+      rows: payments.map((p) => [
+        p.payment_date,
+        METHOD_LABELS[p.payment_method],
+        p.month ? MONTHS[p.month] : "",
+        p.year ?? "",
+        Number(p.amount),
+        (p.currency as Currency) ?? "EUR",
+        p.notes ?? "",
+      ]) as unknown[][],
+    };
+    const slug = family.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "family";
+    await exportWorkbook(dateStampedFilename(`family-${slug}`), [infoSheet, studentsSheet, paymentsSheet]);
+  }
+
   if (loading) return <div className="p-8 text-gray-500">Loading…</div>;
   if (error) return <div className="p-8 text-red-600">{error}</div>;
   if (!data) return null;
@@ -263,7 +318,15 @@ export default function FamilyDetailPage() {
     <div>
       <Header titleKey="page.families" />
       <div className="p-6 space-y-6 max-w-4xl">
-        <Link href="/families" className="text-sm text-blue-600 hover:underline block">← Back to families</Link>
+        <div className="flex items-center justify-between">
+          <Link href="/families" className="text-sm text-blue-600 hover:underline">← Back to families</Link>
+          <button
+            onClick={handleExport}
+            className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm"
+          >
+            Export Excel
+          </button>
+        </div>
 
         {/* Balance summary */}
         <div className="grid grid-cols-3 gap-4">

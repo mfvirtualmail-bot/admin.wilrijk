@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
+import { exportSheet, dateStampedFilename } from "@/lib/export-utils";
 import type { User } from "@/lib/types";
 
 export default function UsersPage() {
@@ -39,6 +40,18 @@ export default function UsersPage() {
 
   const LANG_LABELS: Record<string, string> = { en: "EN", nl: "NL", yi: "יי" };
 
+  async function handleExport() {
+    const headers = ["Display Name", "Username", "Language", "Role", "Status"];
+    const rows = users.map((u) => [
+      u.display_name,
+      u.username,
+      LANG_LABELS[u.language] ?? u.language,
+      u.is_super_admin ? "Super Admin" : "User",
+      u.is_active ? "Active" : "Inactive",
+    ]);
+    await exportSheet(dateStampedFilename("users"), "Users", headers, rows);
+  }
+
   return (
     <div>
       <Header titleKey="page.users" />
@@ -47,14 +60,23 @@ export default function UsersPage() {
           <p className="text-gray-600">
             {users.length} user{users.length !== 1 ? "s" : ""}
           </p>
-          {currentUser?.is_super_admin && (
-            <Link
-              href="/admin/users/new"
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm"
+          <div className="flex gap-2">
+            <button
+              onClick={handleExport}
+              disabled={users.length === 0}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm disabled:opacity-40"
             >
-              + New User
-            </Link>
-          )}
+              Export Excel
+            </button>
+            {currentUser?.is_super_admin && (
+              <Link
+                href="/admin/users/new"
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm"
+              >
+                + New User
+              </Link>
+            )}
+          </div>
         </div>
 
         {loading && (

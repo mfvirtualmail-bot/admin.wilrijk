@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Header from "@/components/Header";
 import { formatEur } from "@/lib/payment-utils";
+import { exportWorkbook, dateStampedFilename } from "@/lib/export-utils";
 
 interface MonthlyStat {
   month: number;
@@ -71,17 +72,72 @@ export default function ReportsPage() {
 
   if (!data) return null;
 
-  const { summary, monthlyStats, methodBreakdown, outstandingFamilies } = data;
+  const { summary, monthlyStats, methodBreakdown, outstandingFamilies, academicYear } = data;
   const collectionRate = summary.totalCharged > 0
     ? Math.round((summary.totalPaid / summary.totalCharged) * 100)
     : 0;
 
   const maxCollected = Math.max(...monthlyStats.map((m) => m.expected), 1);
 
+  async function handleExport() {
+    const summarySheet = {
+      name: "Summary",
+      headers: ["Metric", "Value"],
+      rows: [
+        ["Academic Year", `${academicYear}-${academicYear + 1}`],
+        ["Family Count", summary.familyCount],
+        ["Total Charged", summary.totalCharged],
+        ["Total Collected", summary.totalPaid],
+        ["Outstanding", summary.totalDue],
+        ["Collection Rate (%)", collectionRate],
+      ] as unknown[][],
+    };
+    const monthlySheet = {
+      name: "Monthly Collection",
+      headers: ["Month", "Expected", "Collected", "Gap", "Paid Count", "Total Families"],
+      rows: monthlyStats.map((m) => [
+        m.hebrewLabel,
+        m.expected,
+        m.collected,
+        m.expected - m.collected,
+        m.paidCount,
+        m.totalFamilies,
+      ]) as unknown[][],
+    };
+    const methodSheet = {
+      name: "Payment Methods",
+      headers: ["Method", "Count", "Amount"],
+      rows: Object.entries(methodBreakdown).map(([method, { count, amount }]) => [
+        METHOD_NAMES[method] ?? method,
+        count,
+        amount,
+      ]) as unknown[][],
+    };
+    const outstandingSheet = {
+      name: "Outstanding",
+      headers: ["Family", "Charged", "Paid", "Due"],
+      rows: outstandingFamilies.map((f) => [f.name, f.charged, f.paid, f.due]) as unknown[][],
+    };
+    await exportWorkbook(
+      dateStampedFilename(`reports-${academicYear}`),
+      [summarySheet, monthlySheet, methodSheet, outstandingSheet],
+    );
+  }
+
   return (
     <div>
       <Header titleKey="page.reports" />
       <div className="p-6 space-y-6 max-w-5xl">
+
+        {/* Toolbar */}
+        <div className="flex justify-end">
+          <button
+            onClick={handleExport}
+            className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm"
+          >
+            Export Excel
+          </button>
+        </div>
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
