@@ -71,7 +71,11 @@ export interface Charge {
   updated_at: string;
 }
 
-export type PaymentMethod = "crc" | "kas" | "bank" | "other";
+export type PaymentMethod = string;
+/** The four built-in payment method codes. Users can define additional
+ * codes via Settings → Payment Methods; those codes are plain strings
+ * that flow through the same column (VARCHAR) in the database. */
+export const BUILTIN_PAYMENT_METHODS = ["crc", "kas", "bank", "other"] as const;
 
 export interface Payment {
   id: string;

@@ -63,7 +63,17 @@ export async function POST(req: NextRequest) {
   const errors: Array<{ row: number; family: string; message: string }> = [];
   let skipped = 0;
 
-  const validMethods = new Set(["crc", "kas", "bank", "other"]);
+  // Read the admin-configured method codes from settings so that custom
+  // methods added under Settings → Payment Methods are also accepted.
+  const { data: settingsRows } = await db
+    .from("settings")
+    .select("key, value")
+    .eq("key", "payment_method_labels");
+  const configuredLabels = (settingsRows?.[0]?.value ?? {}) as Record<string, string>;
+  const validMethods = new Set<string>([
+    "crc", "kas", "bank", "other",
+    ...Object.keys(configuredLabels),
+  ]);
   const today = new Date().toISOString().slice(0, 10);
 
   payments.forEach((p, idx) => {

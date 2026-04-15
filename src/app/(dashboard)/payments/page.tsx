@@ -4,14 +4,16 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, METHOD_COLORS, MONTHS, formatDate, formatCurrency } from "@/lib/payment-utils";
+import { METHOD_COLORS, MONTHS, formatDate, formatCurrency } from "@/lib/payment-utils";
+import { usePaymentMethods } from "@/lib/use-settings";
 import { familyDisplayName } from "@/lib/family-utils";
-import type { Payment, PaymentMethod, Currency } from "@/lib/types";
+import type { Payment, Currency } from "@/lib/types";
 
 type PaymentWithFamily = Payment & { families: { name: string; father_name: string | null } | null };
 
 export default function PaymentsPage() {
   const { user } = useAuth();
+  const { methodLabels } = usePaymentMethods();
   const [payments, setPayments] = useState<PaymentWithFamily[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -106,8 +108,8 @@ export default function PaymentsPage() {
           <select value={filterMethod} onChange={(e) => setFilterMethod(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
             <option value="all">All methods</option>
-            {(Object.keys(METHOD_LABELS) as PaymentMethod[]).map((m) => (
-              <option key={m} value={m}>{METHOD_LABELS[m]}</option>
+            {Object.keys(methodLabels).map((m) => (
+              <option key={m} value={m}>{methodLabels[m]}</option>
             ))}
           </select>
           <span className="text-sm text-gray-500">{filtered.length} payments</span>
@@ -182,8 +184,8 @@ export default function PaymentsPage() {
                       <Link href={`/families/${p.family_id}`} className="hover:text-blue-600">{p.families ? familyDisplayName(p.families.name, p.families.father_name) : "—"}</Link>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${METHOD_COLORS[p.payment_method]}`}>
-                        {METHOD_LABELS[p.payment_method]}
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${METHOD_COLORS[p.payment_method] ?? "bg-gray-100 text-gray-700"}`}>
+                        {methodLabels[p.payment_method] ?? p.payment_method}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
