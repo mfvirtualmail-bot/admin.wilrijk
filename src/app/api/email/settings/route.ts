@@ -52,8 +52,16 @@ export async function PUT(req: Request) {
   for (const k of allowed) {
     if (k in body) update[k] = body[k];
   }
+  // Gmail displays app passwords with spaces ("abcd efgh ijkl mnop") but the
+  // SMTP server expects them without. Also trim any newlines/tabs a user
+  // may have copied in. Same for smtp_user — Gmail is case-insensitive but
+  // stray whitespace will break auth.
+  if (typeof update.smtp_user === "string") {
+    update.smtp_user = (update.smtp_user as string).trim();
+  }
   if ("smtp_password" in body && body.smtp_password !== PASSWORD_MASK) {
-    update.smtp_password = body.smtp_password || null;
+    const raw = body.smtp_password;
+    update.smtp_password = raw ? String(raw).replace(/\s+/g, "") : null;
   }
 
   const { error } = await db.from("email_settings").upsert({ id: 1, ...update }, { onConflict: "id" });

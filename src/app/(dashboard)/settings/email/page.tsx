@@ -32,6 +32,8 @@ export default function EmailSettingsPage() {
   const [msg, setMsg] = useState("");
   const [password, setPassword] = useState(PASSWORD_MASK); // sentinel = "don't change"
   const [showPassword, setShowPassword] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/email/settings")
@@ -68,6 +70,24 @@ export default function EmailSettingsPage() {
       if (updated.settings) setS(updated.settings);
     }
     setSaving(false);
+  }
+
+  async function testConnection() {
+    setVerifying(true);
+    setVerifyMsg(null);
+    try {
+      const r = await fetch("/api/email/verify", { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) {
+        setVerifyMsg({ ok: true, text: `Connected as ${d.user} (${d.host}:${d.port}).` });
+      } else {
+        setVerifyMsg({ ok: false, text: d.error ?? "Connection failed." });
+      }
+    } catch (e) {
+      setVerifyMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed" });
+    } finally {
+      setVerifying(false);
+    }
   }
 
   if (!isSuperAdmin) {
@@ -291,7 +311,7 @@ export default function EmailSettingsPage() {
             </Field>
           </section>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 flex-wrap">
             <button
               type="submit"
               disabled={saving}
@@ -299,10 +319,62 @@ export default function EmailSettingsPage() {
             >
               {saving ? "Saving…" : "Save settings"}
             </button>
+            <button
+              type="button"
+              onClick={testConnection}
+              disabled={verifying || !s.has_password}
+              title={!s.has_password ? "Save the password first" : "Try an SMTP login without sending anything"}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+            >
+              {verifying ? "Testing…" : "Test SMTP connection"}
+            </button>
             {msg && (
               <span className={`text-sm ${msg === "Saved." ? "text-green-600" : "text-red-600"}`}>{msg}</span>
             )}
+            {verifyMsg && (
+              <span className={`text-sm ${verifyMsg.ok ? "text-green-600" : "text-red-600"}`}>
+                {verifyMsg.ok ? "✓ " : "✗ "}
+                {verifyMsg.text}
+              </span>
+            )}
           </div>
+
+          {verifyMsg && !verifyMsg.ok && /535|BadCredentials|Username and Password/i.test(verifyMsg.text) && (
+            <div className="mt-2 text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded-md p-3 leading-relaxed">
+              <div className="font-semibold mb-1">Gmail rejected the credentials. Common fixes:</div>
+              <ol className="list-decimal ml-5 space-y-1">
+                <li>
+                  Make sure <strong>2-Step Verification</strong> is <em>on</em> for this Google
+                  account (app passwords don&rsquo;t work without it).
+                </li>
+                <li>
+                  Generate a fresh app password at{" "}
+                  <a
+                    href="https://myaccount.google.com/apppasswords"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    myaccount.google.com/apppasswords
+                  </a>
+                  . Copy all 16 characters (spaces are OK — we strip them).
+                </li>
+                <li>
+                  Re-type the Gmail address above; a typo or a different case doesn&rsquo;t
+                  break the login in most cases, but stray whitespace does.
+                </li>
+                <li>
+                  If this is a <strong>Google Workspace</strong> account, the admin may have
+                  disabled app passwords or blocked third-party SMTP. Ask the admin to allow
+                  app passwords, or use a personal Gmail account instead.
+                </li>
+                <li>
+                  &ldquo;Advanced Protection&rdquo; on the Google account will block app
+                  passwords entirely. Turn it off or use a different account.
+                </li>
+              </ol>
+            </div>
+          )}
         </form>
       </div>
     </div>
