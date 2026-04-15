@@ -33,32 +33,54 @@ export async function GET() {
   const minYear = academicYear;
   const maxYear = academicYear + 1;
 
-  const [familiesRes, childrenRes, paymentsRes] = await Promise.all([
+  const [familiesRes, paymentsRes, chargesRes] = await Promise.all([
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
-    db.from("children").select("family_id, monthly_tuition").eq("is_active", true),
     db.from("payments")
       .select("id, family_id, amount, payment_date, payment_method, month, year")
+      .gte("year", minYear)
+      .lte("year", maxYear),
+    db.from("charges")
+      .select("family_id, amount, month, year")
       .gte("year", minYear)
       .lte("year", maxYear),
   ]);
 
   const families = familiesRes.data ?? [];
-  const children = childrenRes.data ?? [];
   const payments = paymentsRes.data ?? [];
+  const charges = chargesRes.data ?? [];
 
-  // Monthly tuition per family
-  const tuitionByFamily: Record<string, number> = {};
-  for (const c of children) {
-    tuitionByFamily[c.family_id] = (tuitionByFamily[c.family_id] ?? 0) + Number(c.monthly_tuition);
+  // Only count charges whose month has already started. The charges table
+  // already reflects per-child enrollment windows (see generateChargesForChild),
+  // so a simple date filter correctly excludes both future months and months
+  // where the student wasn't enrolled.
+  const now = new Date();
+  const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
+  const pastCharges = charges.filter(
+    (c) => Number(c.year) * 12 + Number(c.month) <= currentKey,
+  );
+
+  // Charges per family, limited to past/current months.
+  const chargedByFamily: Record<string, number> = {};
+  for (const c of pastCharges) {
+    chargedByFamily[c.family_id] =
+      (chargedByFamily[c.family_id] ?? 0) + Number(c.amount);
   }
 
-  const totalMonthlyExpected = Object.values(tuitionByFamily).reduce((s, v) => s + v, 0);
-
   // --- Monthly breakdown ---
+  // "expected" for a given month is the sum of charges actually generated
+  // for that month (respecting enrollment), not a flat "all families × flat
+  // tuition" that ignores who was enrolled. For months that haven't started
+  // yet we still show the prospective expected amount from charges, so the
+  // user can see what will come due.
+  const expectedByMonth = new Map<string, number>();
+  for (const c of charges) {
+    const key = `${c.year}-${c.month}`;
+    expectedByMonth.set(key, (expectedByMonth.get(key) ?? 0) + Number(c.amount));
+  }
   const monthlyStats = months.map(({ month, year }) => {
     const monthPayments = payments.filter((p) => p.month === month && p.year === year);
     const collected = monthPayments.reduce((s, p) => s + Number(p.amount), 0);
-    const expected = totalMonthlyExpected;
+    const expected = expectedByMonth.get(`${year}-${month}`) ?? 0;
     return {
       month,
       year,
@@ -87,8 +109,7 @@ export async function GET() {
 
   const outstandingFamilies = families
     .map((f) => {
-      const tuition = tuitionByFamily[f.id] ?? 0;
-      const charged = tuition * months.length;
+      const charged = chargedByFamily[f.id] ?? 0;
       const paid = paymentsByFamily[f.id] ?? 0;
       const due = charged - paid;
       return { id: f.id, name: f.father_name ? `${f.name} (${f.father_name})` : f.name, charged, paid, due };
@@ -97,7 +118,7 @@ export async function GET() {
     .sort((a, b) => b.due - a.due);
 
   // --- Summary totals ---
-  const totalCharged = totalMonthlyExpected * months.length;
+  const totalCharged = pastCharges.reduce((s, c) => s + Number(c.amount), 0);
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
   const totalDue = Math.max(0, totalCharged - totalPaid);
 

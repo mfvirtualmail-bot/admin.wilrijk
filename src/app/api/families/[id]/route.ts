@@ -28,7 +28,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (familyRes.error || !familyRes.data)
     return NextResponse.json({ error: "Family not found" }, { status: 404 });
 
-  const totalCharged = (chargesRes.data ?? []).reduce((s, c) => s + Number(c.amount), 0);
+  // Only count charges for months that have already started (enrollment is
+  // already baked into the charges table by generateChargesForChild, so no
+  // extra enrollment filter is needed here). Future months are not yet
+  // owed, so they must be excluded from "Total Charged" / "Amount Due".
+  const now = new Date();
+  const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
+  const totalCharged = (chargesRes.data ?? [])
+    .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey)
+    .reduce((s, c) => s + Number(c.amount), 0);
   const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
 
   return NextResponse.json({
