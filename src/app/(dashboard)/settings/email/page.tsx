@@ -56,18 +56,38 @@ export default function EmailSettingsPage() {
     const payload: Record<string, unknown> = { ...s };
     delete (payload as { has_password?: boolean }).has_password;
     payload.smtp_password = password; // PASSWORD_MASK means "leave existing value alone"
+
+    // Remember whether this save attempted to set a new password, so we can
+    // flag the (confusing) case where it silently doesn't persist.
+    const attemptedNewPassword =
+      password !== PASSWORD_MASK && password.replace(/\s+/g, "").length > 0;
+
     const res = await fetch("/api/email/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const d = await res.json().catch(() => ({}));
-    setMsg(res.ok ? "Saved." : (d.error ?? "Failed to save"));
-    if (res.ok) {
-      setPassword(PASSWORD_MASK);
-      // Reload to refresh has_password indicator
-      const updated = await fetch("/api/email/settings").then((r) => r.json());
-      if (updated.settings) setS(updated.settings);
+
+    if (!res.ok) {
+      setMsg(d.error ?? "Failed to save");
+      setSaving(false);
+      return;
+    }
+
+    // Use the state returned by the server instead of a second GET — that
+    // avoids a brief window where the UI still shows the old values.
+    if (d.settings) setS(d.settings);
+    setPassword(PASSWORD_MASK);
+
+    if (attemptedNewPassword && d.settings && !d.settings.has_password) {
+      setMsg(
+        "Saved other fields, but the app password did NOT persist. The smtp_password column may be missing — re-run the migration in Supabase."
+      );
+    } else if (attemptedNewPassword) {
+      setMsg("Saved. App password stored — click Test SMTP to verify.");
+    } else {
+      setMsg("Saved.");
     }
     setSaving(false);
   }
@@ -329,7 +349,13 @@ export default function EmailSettingsPage() {
               {verifying ? "Testing…" : "Test SMTP connection"}
             </button>
             {msg && (
-              <span className={`text-sm ${msg === "Saved." ? "text-green-600" : "text-red-600"}`}>{msg}</span>
+              <span
+                className={`text-sm ${
+                  msg.startsWith("Saved") && !msg.includes("did NOT") ? "text-green-600" : "text-red-600"
+                }`}
+              >
+                {msg}
+              </span>
             )}
             {verifyMsg && (
               <span className={`text-sm ${verifyMsg.ok ? "text-green-600" : "text-red-600"}`}>

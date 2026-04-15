@@ -66,5 +66,11 @@ export async function PUT(req: Request) {
 
   const { error } = await db.from("email_settings").upsert({ id: 1, ...update }, { onConflict: "id" });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+
+  // Return the redacted, post-save state so the UI can verify immediately
+  // that the password was stored (avoids a stale-read situation where the
+  // browser shows "empty" even though the value went through).
+  const { data } = await db.from("email_settings").select("*").eq("id", 1).single();
+  if (!data) return NextResponse.json({ ok: true, settings: null });
+  return NextResponse.json({ ok: true, settings: redact(data as EmailSettings) });
 }
