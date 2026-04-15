@@ -13,36 +13,35 @@ import {
 import type { StatementData } from "./statement-data";
 import type { EmailSettings, Currency } from "./types";
 
-// Register a Hebrew-capable font for RTL Yiddish statements. Only register
-// once per process (react-pdf errors if you re-register the same family).
-let hebrewFontRegistered = false;
-function ensureHebrewFont() {
-  if (hebrewFontRegistered) return;
+// Register a combined Latin+Hebrew font so statements render correctly
+// regardless of locale AND so Hebrew in otherwise-English output (e.g. a
+// Hebrew organisation name, Hebrew child names) doesn't turn into mojibake.
+// @fontsource/noto-sans-hebrew ships subsets — register all relevant ones
+// under one family; react-pdf picks the right glyph per codepoint.
+let notoFontRegistered = false;
+function ensureNotoFont() {
+  if (notoFontRegistered) return;
   try {
-    const fontPath = path.join(
-      process.cwd(),
-      "node_modules",
-      "@fontsource",
-      "noto-sans-hebrew",
-      "files",
-      "noto-sans-hebrew-hebrew-400-normal.woff"
-    );
-    const fontPathBold = path.join(
-      process.cwd(),
-      "node_modules",
-      "@fontsource",
-      "noto-sans-hebrew",
-      "files",
-      "noto-sans-hebrew-hebrew-700-normal.woff"
-    );
+    const base = path.join(process.cwd(), "node_modules", "@fontsource", "noto-sans-hebrew", "files");
+    // Subsets at weight 400 + 700 (bold). Three scripts covered: Latin, Latin-ext, Hebrew.
+    const srcs400 = [
+      "noto-sans-hebrew-latin-400-normal.woff",
+      "noto-sans-hebrew-latin-ext-400-normal.woff",
+      "noto-sans-hebrew-hebrew-400-normal.woff",
+    ];
+    const srcs700 = [
+      "noto-sans-hebrew-latin-700-normal.woff",
+      "noto-sans-hebrew-latin-ext-700-normal.woff",
+      "noto-sans-hebrew-hebrew-700-normal.woff",
+    ];
     Font.register({
       family: "NotoHebrew",
       fonts: [
-        { src: fontPath, fontWeight: 400 },
-        { src: fontPathBold, fontWeight: 700 },
+        ...srcs400.map((f) => ({ src: path.join(base, f), fontWeight: 400 as const })),
+        ...srcs700.map((f) => ({ src: path.join(base, f), fontWeight: 700 as const })),
       ],
     });
-    hebrewFontRegistered = true;
+    notoFontRegistered = true;
   } catch {
     // Font file missing — fall back to default Helvetica. Hebrew glyphs
     // will render as boxes, which is a clearer failure than crashing.
@@ -106,11 +105,14 @@ const L = {
 };
 
 export function StatementDocument({ data, settings, locale }: Props) {
-  if (locale === "yi") ensureHebrewFont();
+  // Register the Latin+Hebrew font for every render — an English PDF may
+  // still contain Hebrew glyphs (org name, child names), and Helvetica
+  // (react-pdf's default) has no Hebrew coverage.
+  ensureNotoFont();
 
   const rtl = locale === "yi";
   const lang = L[locale];
-  const fontFamily = locale === "yi" ? "NotoHebrew" : "Helvetica";
+  const fontFamily = "NotoHebrew";
 
   const styles = StyleSheet.create({
     page: {
