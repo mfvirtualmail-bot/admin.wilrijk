@@ -230,12 +230,15 @@ export async function fetchEcbDailyRates(opts: { force?: boolean } = {}): Promis
   if (!res.ok) throw new Error(`ECB fetch failed: HTTP ${res.status}`);
   const xml = await res.text();
 
-  // Extract <Cube time="YYYY-MM-DD"> … <Cube currency="X" rate="Y" />
-  const timeMatch = xml.match(/<Cube\s+time="(\d{4}-\d{2}-\d{2})"/);
+  // Extract <Cube time='YYYY-MM-DD'> … <Cube currency='X' rate='Y' />
+  // ECB actually publishes the XML with *single*-quoted attributes
+  // (time='2024-01-15', currency='USD' rate='1.0891') — accept either
+  // single or double quotes to stay robust if that ever changes.
+  const timeMatch = xml.match(/<Cube\s+time\s*=\s*["'](\d{4}-\d{2}-\d{2})["']/);
   if (!timeMatch) throw new Error("ECB XML missing <Cube time=...>");
   const date = timeMatch[1];
 
-  const rateRegex = /<Cube\s+currency="([A-Z]{3})"\s+rate="([\d.]+)"\s*\/>/g;
+  const rateRegex = /<Cube\s+currency\s*=\s*["']([A-Z]{3})["']\s+rate\s*=\s*["']([\d.]+)["']\s*\/?>/g;
   const parsed: Array<{ currency: string; rate: number }> = [];
   let m: RegExpExecArray | null;
   while ((m = rateRegex.exec(xml)) !== null) {
