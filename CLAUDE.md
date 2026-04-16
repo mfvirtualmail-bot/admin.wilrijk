@@ -1,5 +1,21 @@
 # Admin Wilrijk — Tuition Management System
 
+## BEFORE YOU CHANGE ANYTHING: read the notes
+
+Persistent cross-session memory lives in [`notes/`](./notes/README.md).
+When you touch any of these areas, **open the relevant topic file first**
+— it documents decisions, invariants, and past regressions that aren't
+obvious from the code:
+
+- Money / FX / currency conversion → `notes/fx-currency.md`
+- Email statements, PDFs, Hebrew fonts → `notes/email-pdf.md`
+- Excel import/export, dates, payment methods → `notes/excel.md`
+- Branch / deploy / verification workflow → `notes/environment.md`
+- **Past regressions that will bite you again if ignored** → `notes/gotchas.md`
+
+Update the relevant file when you change behaviour a future session
+would need to re-discover.
+
 ## IMPORTANT: Environment Note
 User runs **Claude Code on the web**. There is NO local browser access.
 - Never suggest opening `localhost:3000` — the user cannot see it
@@ -79,24 +95,11 @@ supabase/
 - i18n: per-user language stored in DB, persists across sessions
 
 ## DO NOT BREAK: PDF font bundling on Vercel
-Email-statement PDFs use `@react-pdf/renderer` with a combined Latin+Hebrew
-font. The only arrangement that works on Vercel's serverless runtime is:
 
-1. The font must be a **TTF** file committed at `./fonts/NotoSansHebrew-{Regular,Bold}.ttf`.
-   - `@fontsource/noto-sans-hebrew` `.woff` subsets DO NOT WORK — Vercel's
-     file-tracer strips them because nothing statically imports them,
-     producing an `ENOENT /var/task/node_modules/@fontsource/...woff` at runtime.
-2. `next.config.mjs` must declare `experimental.outputFileTracingIncludes`
-   for every email-related route, mapping `./fonts/**/*` in. Without this
-   the TTF is also stripped.
-3. `src/lib/pdf-statement.tsx` must load the TTF from `process.cwd()/fonts`
-   via `fs` and **throw** if missing — never silently fall back to Helvetica,
-   which renders Hebrew as mojibake and hides the underlying config drift.
-
-If a future change regresses this (e.g. accidentally reverts `next.config.mjs`
-or swaps back to `@fontsource` `.woff`), the symptom is the ENOENT error
-quoted above and/or mojibake on the English PDF when the org name or a
-child carries a Hebrew name. Historical fix: commit `661610e`.
+Full detail lives in `notes/email-pdf.md` and `notes/gotchas.md` §3.
+Summary: Hebrew PDF needs TTFs at `./fonts/` + `outputFileTracingIncludes`
+in `next.config.mjs` + a hard throw in `pdf-statement.tsx` if the font is
+missing. Historical fix: commit `661610e`.
 
 ## Implementation Phases
 - **Phase 0** (Foundation): Project scaffolding, auth, layout, shell pages -- DONE
