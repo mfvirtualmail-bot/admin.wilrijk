@@ -34,13 +34,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { name, father_name, mother_name, address, city, postal_code, phone, email, notes } = body;
+  const { name, father_name, mother_name, address, city, postal_code, phone, email, notes, language } = body;
   if (!name?.trim()) return NextResponse.json({ error: "Name is required" }, { status: 400 });
+
+  const validLang = language === "yi" || language === "en" ? language : "en";
 
   const db = createServerClient();
   const { data, error } = await db
     .from("families")
-    .insert({ name: name.trim(), father_name, mother_name, address, city, postal_code, phone, email, notes })
+    .insert({
+      name: name.trim(),
+      father_name,
+      mother_name,
+      address,
+      city,
+      postal_code,
+      phone,
+      email,
+      notes,
+      language: validLang,
+    })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
