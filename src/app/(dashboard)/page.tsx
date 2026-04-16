@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { t } from "@/lib/i18n";
 import Header from "@/components/Header";
 import { formatEur } from "@/lib/payment-utils";
+import ConversionBreakdown, { type BreakdownRow } from "@/components/ConversionBreakdown";
 
 interface DashboardStats {
   families: number;
@@ -14,6 +15,13 @@ interface DashboardStats {
   totalDue: number;
   totalCharged: number;
   monthlyExpected: number;
+}
+
+interface DashboardBreakdown {
+  payments: BreakdownRow[];
+  charges: BreakdownRow[];
+  paymentsMissing: number;
+  chargesMissing: number;
 }
 
 interface RecentPayment {
@@ -35,13 +43,18 @@ export default function DashboardPage() {
   const { user, locale } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([]);
+  const [breakdown, setBreakdown] = useState<DashboardBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("/api/dashboard")
       .then((r) => r.json())
       .then((d) => {
-        if (d.stats) { setStats(d.stats); setRecentPayments(d.recentPayments); }
+        if (d.stats) {
+          setStats(d.stats);
+          setRecentPayments(d.recentPayments);
+          setBreakdown(d.breakdown ?? null);
+        }
       })
       .finally(() => setLoading(false));
   }, []);
@@ -129,6 +142,20 @@ export default function DashboardPage() {
               <span>{t(locale, "dashboard.paid")}: {formatEur(stats.totalPaid)}</span>
               <span>{t(locale, "dashboard.charged")}: {formatEur(stats.totalCharged)}</span>
             </div>
+            {breakdown && (
+              <>
+                <ConversionBreakdown
+                  label="Payments"
+                  rows={breakdown.payments}
+                  missing={breakdown.paymentsMissing}
+                />
+                <ConversionBreakdown
+                  label="Charges"
+                  rows={breakdown.charges}
+                  missing={breakdown.chargesMissing}
+                />
+              </>
+            )}
           </div>
         )}
 

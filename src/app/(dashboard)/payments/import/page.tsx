@@ -11,9 +11,8 @@ import {
   type PaymentMonthGroup,
   type ImportPayment,
 } from "@/lib/excel-utils";
-import { ACADEMIC_MONTHS, CURRENCY_OPTIONS, CURRENCY_SYMBOLS } from "@/lib/payment-utils";
+import { ACADEMIC_MONTHS, CURRENCY_SYMBOLS } from "@/lib/payment-utils";
 import { usePaymentMethods } from "@/lib/use-settings";
-import type { Currency } from "@/lib/types";
 
 type WizardStep = "upload" | "map" | "match" | "preview" | "importing" | "done";
 
@@ -40,7 +39,6 @@ export default function PaymentsImportPage() {
   const { methodLabels } = usePaymentMethods();
   const [step, setStep] = useState<WizardStep>("upload");
   const [academicYear, setAcademicYear] = useState(defaultAcademicYear());
-  const [currency, setCurrency] = useState<Currency>("EUR");
 
   // Excel parse result
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -198,7 +196,7 @@ export default function PaymentsImportPage() {
       const res = await fetch("/api/payments/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payments: resolvedPayments, currency }),
+        body: JSON.stringify({ payments: resolvedPayments }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -283,20 +281,12 @@ export default function PaymentsImportPage() {
                   </p>
                 </div>
 
-                <div>
+                <div className="max-w-md">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Currency</label>
-                  <select
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value as Currency)}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {CURRENCY_OPTIONS.map((c) => (
-                      <option key={c.value} value={c.value}>{c.label}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    All payments in this file will be recorded in this currency.
-                  </p>
+                  <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-md text-xs text-blue-800">
+                    <strong>Auto-detected per cell.</strong> Cells prefixed with £ or $
+                    are imported as GBP / USD; everything else is treated as EUR.
+                  </div>
                 </div>
               </div>
 
@@ -673,7 +663,7 @@ export default function PaymentsImportPage() {
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right font-semibold text-gray-900">
-                              {CURRENCY_SYMBOLS[currency]}{p.amount.toFixed(2)}
+                              {CURRENCY_SYMBOLS[p.currency]}{p.amount.toFixed(2)}
                             </td>
                             <td className="px-4 py-2">
                               {matched ? (

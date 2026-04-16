@@ -7,42 +7,70 @@ function fmtCurrency(n: number, currency: Currency = "EUR"): string {
   return (SYM[currency] ?? "€") + n.toLocaleString("nl-BE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/** The placeholders a template author can use inside subject + body. */
+/** The placeholders a template author can use inside subject + body.
+ * Each entry carries a `locale` hint so the editor UI can show the right
+ * set per language tab:
+ *   - "en"   → English-only
+ *   - "yi"   → Yiddish/Hebrew-only
+ *   - "both" → useful in either language */
 export const TEMPLATE_PLACEHOLDERS = [
-  { key: "family_name", description: "Family surname" },
-  { key: "hebrew_family_name", description: "Hebrew family name (if set)" },
-  { key: "contact_name", description: "Father/mother name, best available" },
-  { key: "balance", description: "Current balance due, formatted with currency" },
-  { key: "total_charged", description: "Total charges to date, formatted" },
-  { key: "total_paid", description: "Total payments to date, formatted" },
-  { key: "statement_date", description: "Today's date, yyyy-mm-dd" },
-  { key: "org_name", description: "Organisation name from settings" },
-  { key: "children_names", description: "Comma-separated child names" },
+  { key: "family_name", description: "Family surname (English)", locale: "en" as const },
+  { key: "hebrew_family_name", description: "Family surname (Hebrew)", locale: "yi" as const },
+  { key: "father_name", description: "Father's name (English)", locale: "en" as const },
+  { key: "hebrew_father_name", description: "Father's name (Hebrew)", locale: "yi" as const },
+  { key: "contact_name", description: "Best-available English contact name", locale: "en" as const },
+  { key: "hebrew_contact_name", description: "Best-available Hebrew contact name", locale: "yi" as const },
+  { key: "children_names", description: "Child first names, comma-separated (English)", locale: "en" as const },
+  { key: "hebrew_children_names", description: "Child Hebrew names, comma-separated", locale: "yi" as const },
+  { key: "balance", description: "Current balance due, formatted with currency", locale: "both" as const },
+  { key: "total_charged", description: "Total charges to date, formatted", locale: "both" as const },
+  { key: "total_paid", description: "Total payments to date, formatted", locale: "both" as const },
+  { key: "statement_date", description: "Today's date, yyyy-mm-dd", locale: "both" as const },
+  { key: "org_name", description: "Organisation name from settings", locale: "both" as const },
 ] as const;
 
 export type TemplateVars = Record<(typeof TEMPLATE_PLACEHOLDERS)[number]["key"], string>;
 
 export function buildTemplateVars(data: StatementData, settings: Pick<EmailSettings, "org_name">): TemplateVars {
-  const contactName =
-    data.family.father_name?.trim() ||
-    data.family.mother_name?.trim() ||
-    data.family.name;
+  const fatherName = data.family.father_name?.trim() ?? "";
+  const motherName = data.family.mother_name?.trim() ?? "";
+  const hebrewFatherName = data.family.hebrew_father_name?.trim() ?? "";
+  const hebrewFamilyName = data.family.hebrew_name?.trim() ?? "";
 
+  const contactName = fatherName || motherName || data.family.name;
+  // Hebrew contact falls back sensibly: hebrew father name → hebrew family
+  // name → English contact name. Never empty.
+  const hebrewContactName = hebrewFatherName || hebrewFamilyName || contactName;
+
+  // First names only — the family surname is already carried by
+  // {{family_name}} / {{hebrew_family_name}}, so printing "David Cohen,
+  // Sarah Cohen" duplicates it awkwardly.
   const childrenNames = data.children
-    .map((c) => `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim())
+    .map((c) => (c.first_name ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+
+  // Hebrew child names. When a child has no hebrew_name recorded we fall
+  // back to the English first name so the list is never empty.
+  const hebrewChildrenNames = data.children
+    .map((c) => (c.hebrew_name?.trim() || c.first_name?.trim() || ""))
     .filter(Boolean)
     .join(", ");
 
   return {
     family_name: data.family.name,
-    hebrew_family_name: data.family.hebrew_name ?? "",
+    hebrew_family_name: hebrewFamilyName,
+    father_name: fatherName,
+    hebrew_father_name: hebrewFatherName,
     contact_name: contactName,
+    hebrew_contact_name: hebrewContactName,
+    children_names: childrenNames,
+    hebrew_children_names: hebrewChildrenNames,
     balance: fmtCurrency(data.balanceDue, data.currency),
     total_charged: fmtCurrency(data.totalCharged, data.currency),
     total_paid: fmtCurrency(data.totalPaid, data.currency),
     statement_date: data.statementDate,
     org_name: settings.org_name,
-    children_names: childrenNames,
   };
 }
 

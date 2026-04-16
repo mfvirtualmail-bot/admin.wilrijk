@@ -3,6 +3,8 @@ import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { generateChargesForChild, getCurrentBaseYear } from "@/lib/charge-utils";
+import { convertManyToEur } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -30,7 +32,47 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ children: data });
+
+  // Convert the active children's monthly tuitions to EUR at today's rate
+  // so the page can show a meaningful combined total even when families
+  // are billed in different currencies.
+  const today = new Date().toISOString().slice(0, 10);
+  const active = (data ?? []).filter((c) => c.is_active);
+  const conv = await convertManyToEur(
+    active.map((c) => ({
+      id: c.id as string,
+      amount: Number(c.monthly_tuition),
+      currency: ((c.currency as Currency) ?? "EUR") as Currency,
+      date: today,
+    })),
+  );
+  type CurSum = { count: number; original: number; eur: number; rates: Set<string> };
+  const map = new Map<Currency, CurSum>();
+  for (const r of conv.breakdown) {
+    const c = r.originalCurrency;
+    if (!map.has(c)) map.set(c, { count: 0, original: 0, eur: 0, rates: new Set() });
+    const s = map.get(c)!;
+    s.count++;
+    s.original += r.originalAmount;
+    s.eur += r.eur;
+    if (c !== "EUR") s.rates.add(r.rate.toFixed(4));
+  }
+  const breakdown = Array.from(map.entries()).map(([currency, s]) => ({
+    currency,
+    count: s.count,
+    original: Math.round(s.original * 100) / 100,
+    eur: Math.round(s.eur * 100) / 100,
+    rates: Array.from(s.rates),
+  }));
+
+  return NextResponse.json({
+    children: data,
+    summary: {
+      totalMonthlyEur: conv.totalEur,
+      missing: conv.missing.length,
+      breakdown,
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {

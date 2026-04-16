@@ -19,6 +19,18 @@ export interface Session {
 
 export type Currency = "EUR" | "USD" | "GBP";
 
+export type FxSource = "ecb" | "manual";
+
+export interface ExchangeRate {
+  /** ISO date, YYYY-MM-DD */
+  date: string;
+  currency: Exclude<Currency, "EUR">;
+  /** Amount of `currency` per 1 EUR, e.g. 0.8540 for GBP. */
+  rate: number;
+  source: FxSource;
+  updated_at: string;
+}
+
 export interface Family {
   id: string;
   name: string;

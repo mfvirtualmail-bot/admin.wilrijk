@@ -3,7 +3,7 @@
  * Uses the xlsx library (already installed) for file parsing.
  */
 
-import type { PaymentMethod } from "./types";
+import type { PaymentMethod, Currency } from "./types";
 import { HEBREW_MONTH_NAMES } from "./hebrew-date";
 
 // ──────────────────────────────────────────────
@@ -313,24 +313,57 @@ export function parseAmount(raw: unknown): number | null {
   return n;
 }
 
-/** Map of known payment method variants to canonical values */
-const METHOD_MAP: Record<string, PaymentMethod> = {
+/**
+ * Detect the currency of an Excel cell based on a leading/trailing
+ * £ / $ / € symbol. Bare numeric cells (no symbol) return `null`
+ * so the caller can apply the spec default (always EUR).
+ */
+export function detectCurrency(raw: unknown): Currency | null {
+  if (raw == null) return null;
+  const s = String(raw);
+  if (s.includes("€") || /\bEUR\b/i.test(s)) return "EUR";
+  if (s.includes("£") || /\bGBP\b/i.test(s)) return "GBP";
+  if (s.includes("$") || /\bUSD\b/i.test(s)) return "USD";
+  return null;
+}
+
+/**
+ * Parse an amount + currency in one pass. The returned currency is
+ * detected from a £/$/€ prefix; bare numeric cells resolve to EUR
+ * per product spec.
+ */
+export function parseAmountWithCurrency(raw: unknown): { amount: number; currency: Currency } | null {
+  const amount = parseAmount(raw);
+  if (amount === null) return null;
+  const currency = detectCurrency(raw) ?? "EUR";
+  return { amount, currency };
+}
+
+/** Map of known payment method aliases that should collapse to a
+ * built-in code. Unrecognised values pass through unchanged so custom
+ * method codes defined under Settings → Payment Methods (e.g. "chq"
+ * or "paypal") survive the import round-trip; the server's validator
+ * checks them against the full configured allow-list. */
+const METHOD_ALIAS_MAP: Record<string, PaymentMethod> = {
   crc: "crc", credit: "crc", "credit card": "crc",
   kas: "kas", cash: "kas", contant: "kas",
   bank: "bank", transfer: "bank", overschrijving: "bank",
   other: "other", anders: "other",
-  // Unknown codes become "other"
-  jj: "other", "#": "other",
+  // Legacy placeholder values that mean "don't know" — treat as other.
+  "#": "other",
 };
 
 /**
- * Normalize a raw payment method string to a canonical PaymentMethod.
- * Returns "other" for unrecognized values.
+ * Normalize a raw payment method string. Known aliases collapse to a
+ * built-in code; every other non-empty string is lower-cased and
+ * returned as-is so custom settings codes are preserved. Empty
+ * cells default to the product-wide fallback ("kas").
  */
 export function normalizePaymentMethod(raw: unknown): PaymentMethod {
   if (!raw) return "kas";
   const s = String(raw).toLowerCase().trim();
-  return METHOD_MAP[s] ?? "other";
+  if (!s) return "kas";
+  return METHOD_ALIAS_MAP[s] ?? s;
 }
 
 /**
@@ -360,6 +393,9 @@ export interface ImportChild {
   hebrew_name: string | null;
   date_of_birth: string | null;
   monthly_tuition: number;
+  /** Currency detected from £/$/€ prefix on the tuition cell. Bare
+   *  cells resolve to EUR. */
+  currency: Currency;
   notes: string | null;
 }
 
@@ -461,7 +497,7 @@ export function processFamilyRows(
       const hebrewName = get("child_hebrew_name") || null;
       // Pass raw so Date objects / Excel serials parse unambiguously.
       const dob = parseEuropeanDate(getRaw("child_dob"));
-      const tuition = parseAmount(getRaw("monthly_tuition")) ?? 0;
+      const tuitionParsed = parseAmountWithCurrency(getRaw("monthly_tuition"));
       const rijks = get("rijksregister");
 
       family.children.push({
@@ -469,7 +505,8 @@ export function processFamilyRows(
         last_name: lastName,
         hebrew_name: hebrewName,
         date_of_birth: dob,
-        monthly_tuition: tuition,
+        monthly_tuition: tuitionParsed?.amount ?? 0,
+        currency: tuitionParsed?.currency ?? "EUR",
         notes: rijks ? `Rijksregister: ${rijks}` : null,
       });
     }
@@ -489,6 +526,9 @@ export interface ImportPayment {
   payment_date: string | null;
   payment_method: PaymentMethod;
   amount: number;
+  /** Currency detected from £/$/€ prefix on the amount cell. Bare
+   *  (symbol-less) cells resolve to EUR. */
+  currency: Currency;
   notes: string | null;
   sourceRow: number;
 }
@@ -515,8 +555,8 @@ export function processPaymentRows(
 
     for (const grp of monthGroups) {
       const rawAmount = row[grp.amountCol];
-      const amount = parseAmount(rawAmount);
-      if (!amount) continue; // skip empty/zero months
+      const parsed = parseAmountWithCurrency(rawAmount);
+      if (!parsed) continue; // skip empty/zero months
 
       const rawDate = row[grp.dateCol];
       const rawMethod = row[grp.methodCol];
@@ -524,19 +564,15 @@ export function processPaymentRows(
       const paymentDate = parseEuropeanDate(rawDate);
       const method = normalizePaymentMethod(rawMethod);
 
-      // If the original amount string had a currency symbol, keep it as note
-      const amountStr = String(rawAmount ?? "");
-      const hasUnusualCurrency = /[£$]/.test(amountStr);
-      const notes = hasUnusualCurrency ? `Original: ${amountStr.trim()}` : null;
-
       payments.push({
         family_name: name,
         month: grp.month,
         year: grp.year,
         payment_date: paymentDate,
         payment_method: method,
-        amount,
-        notes,
+        amount: parsed.amount,
+        currency: parsed.currency,
+        notes: null,
         sourceRow: excelRow,
       });
     }

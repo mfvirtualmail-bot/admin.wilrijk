@@ -78,6 +78,26 @@ supabase/
 - No fixed roles — Super Admin assigns granular permissions via checkbox matrix
 - i18n: per-user language stored in DB, persists across sessions
 
+## DO NOT BREAK: PDF font bundling on Vercel
+Email-statement PDFs use `@react-pdf/renderer` with a combined Latin+Hebrew
+font. The only arrangement that works on Vercel's serverless runtime is:
+
+1. The font must be a **TTF** file committed at `./fonts/NotoSansHebrew-{Regular,Bold}.ttf`.
+   - `@fontsource/noto-sans-hebrew` `.woff` subsets DO NOT WORK — Vercel's
+     file-tracer strips them because nothing statically imports them,
+     producing an `ENOENT /var/task/node_modules/@fontsource/...woff` at runtime.
+2. `next.config.mjs` must declare `experimental.outputFileTracingIncludes`
+   for every email-related route, mapping `./fonts/**/*` in. Without this
+   the TTF is also stripped.
+3. `src/lib/pdf-statement.tsx` must load the TTF from `process.cwd()/fonts`
+   via `fs` and **throw** if missing — never silently fall back to Helvetica,
+   which renders Hebrew as mojibake and hides the underlying config drift.
+
+If a future change regresses this (e.g. accidentally reverts `next.config.mjs`
+or swaps back to `@fontsource` `.woff`), the symptom is the ENOENT error
+quoted above and/or mojibake on the English PDF when the org name or a
+child carries a Hebrew name. Historical fix: commit `661610e`.
+
 ## Implementation Phases
 - **Phase 0** (Foundation): Project scaffolding, auth, layout, shell pages -- DONE
 - **Phase 1** (Security): User management UI, permission matrix
