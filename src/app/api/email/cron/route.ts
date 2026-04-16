@@ -27,24 +27,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "SMTP credentials not configured" }, { status: 400 });
   }
 
-  const templates = {
-    en: await getEmailTemplate(db, "en"),
-    yi: await getEmailTemplate(db, "yi"),
-  };
+  const template = await getEmailTemplate(db);
+  if (!template) {
+    return NextResponse.json({ error: "No email template configured" }, { status: 400 });
+  }
 
   const { data } = await db
     .from("families")
-    .select("id, email, language, is_active")
+    .select("id, email, is_active")
     .eq("is_active", true);
-  const rows = ((data ?? []) as Pick<Family, "id" | "email" | "language" | "is_active">[])
+  const rows = ((data ?? []) as Pick<Family, "id" | "email" | "is_active">[])
     .filter((f) => !!f.email);
 
   const transporter = buildTransporter(settings);
   const results = [];
   for (const f of rows) {
-    const loc = (f.language as "en" | "yi") ?? "en";
-    const template = templates[loc] ?? templates.en ?? templates.yi;
-    if (!template) continue;
     const r = await sendFamilyStatement({
       db,
       familyId: f.id,

@@ -15,20 +15,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const familyId = req.nextUrl.searchParams.get("familyId");
-  const localeParam = req.nextUrl.searchParams.get("locale") as "en" | "yi" | "auto" | null;
   if (!familyId) return NextResponse.json({ error: "familyId required" }, { status: 400 });
 
   const db = createServerClient();
   const data = await buildFamilyStatement(db, familyId);
   if (!data) return NextResponse.json({ error: "Family not found" }, { status: 404 });
 
-  const locale: "en" | "yi" =
-    localeParam && localeParam !== "auto"
-      ? localeParam
-      : ((data.family.language as "en" | "yi") ?? "en");
-
   const settings = await getEmailSettings(db);
-  const template = await getEmailTemplate(db, locale);
+  const template = await getEmailTemplate(db);
   if (!settings || !template) {
     return NextResponse.json({ error: "Email settings or template not configured" }, { status: 500 });
   }
@@ -36,16 +30,14 @@ export async function GET(req: NextRequest) {
   const vars = buildTemplateVars(data, settings);
   const subject = renderTemplate(template.subject, vars);
   const bodyText = renderTemplate(template.body, vars);
-  const html = renderHtmlEmail(bodyText, settings, locale);
+  const html = renderHtmlEmail(bodyText, settings);
 
   return NextResponse.json({
     family: {
       id: data.family.id,
       name: data.family.name,
       email: data.family.email,
-      language: data.family.language,
     },
-    locale,
     subject,
     bodyText,
     html,

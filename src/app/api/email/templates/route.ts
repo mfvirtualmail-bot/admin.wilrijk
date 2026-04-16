@@ -3,7 +3,10 @@ import { createServerClient } from "@/lib/supabase";
 import { getSessionUser } from "@/lib/api-auth";
 import type { EmailTemplate } from "@/lib/types";
 
-const SUPPORTED_LOCALES = ["en", "yi"] as const;
+// The app ships a single email template. For historical reasons it is
+// stored under locale="yi" in the DB (the column is kept so we don't need a
+// migration). Any other rows are ignored.
+const TEMPLATE_LOCALE = "yi";
 
 export async function GET() {
   const user = await getSessionUser();
@@ -11,13 +14,13 @@ export async function GET() {
   if (!user.is_super_admin) return NextResponse.json({ error: "Forbidden: super admin only" }, { status: 403 });
 
   const db = createServerClient();
-  const { data, error } = await db.from("email_templates").select("*");
+  const { data, error } = await db
+    .from("email_templates")
+    .select("*")
+    .eq("locale", TEMPLATE_LOCALE)
+    .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Ensure both locales present in the response (empty defaults if missing).
-  const byLocale: Record<string, EmailTemplate> = {};
-  for (const t of (data ?? []) as EmailTemplate[]) byLocale[t.locale] = t;
-  return NextResponse.json({ templates: byLocale });
+  return NextResponse.json({ template: (data as EmailTemplate) ?? null });
 }
 
 export async function PUT(req: Request) {
@@ -26,11 +29,8 @@ export async function PUT(req: Request) {
   if (!user.is_super_admin) return NextResponse.json({ error: "Forbidden: super admin only" }, { status: 403 });
 
   const body = await req.json();
-  const { locale, subject, body: bodyText } = body as { locale: string; subject: string; body: string };
+  const { subject, body: bodyText } = body as { subject: string; body: string };
 
-  if (!SUPPORTED_LOCALES.includes(locale as (typeof SUPPORTED_LOCALES)[number])) {
-    return NextResponse.json({ error: "Unsupported locale" }, { status: 400 });
-  }
   if (!subject?.trim() || !bodyText?.trim()) {
     return NextResponse.json({ error: "Subject and body are required" }, { status: 400 });
   }
@@ -39,7 +39,7 @@ export async function PUT(req: Request) {
   const { error } = await db
     .from("email_templates")
     .upsert(
-      { locale, subject: subject.trim(), body: bodyText, updated_at: new Date().toISOString() },
+      { locale: TEMPLATE_LOCALE, subject: subject.trim(), body: bodyText, updated_at: new Date().toISOString() },
       { onConflict: "locale" }
     );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -17,23 +17,17 @@ export async function GET(req: NextRequest) {
     return new Response("Forbidden", { status: 403 });
 
   const familyId = req.nextUrl.searchParams.get("familyId");
-  const localeParam = req.nextUrl.searchParams.get("locale") as "en" | "yi" | "auto" | null;
   if (!familyId) return new Response("familyId required", { status: 400 });
 
   const db = createServerClient();
   const data = await buildFamilyStatement(db, familyId);
   if (!data) return new Response("Family not found", { status: 404 });
 
-  const locale: "en" | "yi" =
-    localeParam && localeParam !== "auto"
-      ? localeParam
-      : ((data.family.language as "en" | "yi") ?? "en");
-
   const settings = await getEmailSettings(db);
   if (!settings) return new Response("Email settings not configured", { status: 500 });
 
   try {
-    const pdf = await renderStatementPdf(data, settings, locale);
+    const pdf = await renderStatementPdf(data, settings);
     const filename = `statement-${data.family.name.replace(/[^a-z0-9]+/gi, "_")}-${data.statementDate}.pdf`;
     // Cast via Uint8Array to satisfy the Fetch Response BodyInit type in
     // Next.js' runtime (Node Buffer is a subclass but TS narrows it out).

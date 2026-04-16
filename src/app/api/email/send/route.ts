@@ -30,13 +30,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "SMTP credentials not configured" }, { status: 400 });
   }
 
-  // Templates (cached per-locale).
-  const templates = {
-    en: await getEmailTemplate(db, "en"),
-    yi: await getEmailTemplate(db, "yi"),
-  };
-  if (!templates.en && !templates.yi) {
-    return NextResponse.json({ error: "No email templates configured" }, { status: 400 });
+  const template = await getEmailTemplate(db);
+  if (!template) {
+    return NextResponse.json({ error: "No email template configured" }, { status: 400 });
   }
 
   // Resolve the family list.
@@ -44,23 +40,13 @@ export async function POST(req: NextRequest) {
   if (Array.isArray(body.familyIds) && body.familyIds.length > 0) {
     familyIds = body.familyIds;
   } else {
-    const q = db.from("families").select("id, email, is_active, language").order("name");
+    const q = db.from("families").select("id, email, is_active").order("name");
     const { data } = await q;
-    const rows = (data ?? []) as Pick<Family, "id" | "email" | "is_active" | "language">[];
+    const rows = (data ?? []) as Pick<Family, "id" | "email" | "is_active">[];
     familyIds = rows
       .filter((f) => (body.onlyActive === false ? true : f.is_active))
       .filter((f) => (body.onlyWithEmail === false ? true : !!f.email))
       .map((f) => f.id);
-  }
-
-  // Fetch language + email info for all selected families in one query.
-  const { data: famRows } = await db
-    .from("families")
-    .select("id, email, language, is_active")
-    .in("id", familyIds);
-  const famById = new Map<string, Pick<Family, "id" | "email" | "language" | "is_active">>();
-  for (const f of (famRows ?? []) as Pick<Family, "id" | "email" | "language" | "is_active">[]) {
-    famById.set(f.id, f);
   }
 
   // Build one shared transporter for the whole batch.
@@ -68,13 +54,6 @@ export async function POST(req: NextRequest) {
 
   const results = [];
   for (const id of familyIds) {
-    const fam = famById.get(id);
-    const loc = (fam?.language as "en" | "yi") ?? "en";
-    const template = templates[loc] ?? templates.en ?? templates.yi;
-    if (!template) {
-      results.push({ ok: false, to: "", familyId: id, subject: "", error: `No template for locale ${loc}` });
-      continue;
-    }
     const res = await sendFamilyStatement({
       db,
       familyId: id,

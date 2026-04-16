@@ -18,7 +18,6 @@ interface Preview {
   bodyText: string;
   balance: number;
   currency: Currency;
-  locale: "en" | "yi";
 }
 
 interface SendResult {
@@ -41,7 +40,6 @@ export default function EmailsPage() {
 
   // Preview pane
   const [previewFamilyId, setPreviewFamilyId] = useState<string | null>(null);
-  const [previewLocale, setPreviewLocale] = useState<"auto" | "en" | "yi">("auto");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -131,17 +129,11 @@ export default function EmailsPage() {
     setPreviewFamilyId(familyId);
     setPreview(null);
     setPreviewLoading(true);
-    const r = await fetch(`/api/email/preview?familyId=${familyId}&locale=${previewLocale}`);
+    const r = await fetch(`/api/email/preview?familyId=${familyId}`);
     const d = await r.json();
     if (r.ok) setPreview(d);
     setPreviewLoading(false);
   }
-
-  // Refresh preview when locale override changes
-  useEffect(() => {
-    if (previewFamilyId) loadPreview(previewFamilyId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewLocale]);
 
   async function sendTest() {
     if (!previewFamilyId || !testTo.trim()) return;
@@ -153,7 +145,6 @@ export default function EmailsPage() {
       body: JSON.stringify({
         familyId: previewFamilyId,
         toAddress: testTo.trim(),
-        locale: previewLocale === "auto" ? undefined : previewLocale,
       }),
     });
     const d = await r.json().catch(() => ({}));
@@ -249,8 +240,6 @@ export default function EmailsPage() {
                           </div>
                           <div className="text-xs text-gray-500 truncate">
                             {f.email ?? <em className="text-amber-600">no email</em>}
-                            {" · "}
-                            <span className="font-mono">{f.language}</span>
                           </div>
                         </div>
                         {f.balance !== undefined && (
@@ -301,21 +290,9 @@ export default function EmailsPage() {
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
               <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
                 <h2 className="text-sm font-semibold text-gray-900">Preview</h2>
-                <div className="text-xs text-gray-500">
-                  Language:
-                  <select
-                    value={previewLocale}
-                    onChange={(e) => setPreviewLocale(e.target.value as "auto" | "en" | "yi")}
-                    className="ml-1 px-2 py-1 border border-gray-300 rounded text-xs"
-                  >
-                    <option value="auto">Auto (family preference)</option>
-                    <option value="en">English</option>
-                    <option value="yi">Yiddish</option>
-                  </select>
-                </div>
                 {previewFamilyId && (
                   <a
-                    href={`/api/email/pdf?familyId=${previewFamilyId}&locale=${previewLocale}`}
+                    href={`/api/email/pdf?familyId=${previewFamilyId}`}
                     target="_blank"
                     rel="noreferrer"
                     className="ml-auto text-xs text-blue-600 underline"
@@ -355,7 +332,7 @@ export default function EmailsPage() {
                     <summary className="text-xs text-gray-500 cursor-pointer">PDF preview</summary>
                     <iframe
                       title="PDF preview"
-                      src={`/api/email/pdf?familyId=${previewFamilyId}&locale=${previewLocale}`}
+                      src={`/api/email/pdf?familyId=${previewFamilyId}`}
                       className="w-full mt-2"
                       style={{ height: 600, border: "1px solid #eee" }}
                     />

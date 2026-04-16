@@ -6,7 +6,7 @@ import { getEmailSettings, getEmailTemplate, sendFamilyStatement } from "@/lib/e
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-/** POST body: { familyId: string; toAddress: string; locale?: 'en'|'yi' }
+/** POST body: { familyId: string; toAddress: string }
  *  Sends the rendered email + PDF to `toAddress` using `familyId`'s data.
  *  Useful for the admin to preview what a real send looks like. */
 export async function POST(req: NextRequest) {
@@ -18,7 +18,6 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const familyId: string | undefined = body.familyId;
   const toAddress: string | undefined = body.toAddress;
-  const localeOverride: "en" | "yi" | undefined = body.locale;
 
   if (!familyId || !toAddress) {
     return NextResponse.json({ error: "familyId and toAddress are required" }, { status: 400 });
@@ -30,14 +29,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "SMTP credentials not configured" }, { status: 400 });
   }
 
-  // Figure out which locale to render in.
-  let locale: "en" | "yi" = localeOverride ?? "en";
-  if (!localeOverride) {
-    const { data: fam } = await db.from("families").select("language").eq("id", familyId).single();
-    if (fam?.language === "yi") locale = "yi";
-  }
-  const template = await getEmailTemplate(db, locale);
-  if (!template) return NextResponse.json({ error: `No template for locale ${locale}` }, { status: 400 });
+  const template = await getEmailTemplate(db);
+  if (!template) return NextResponse.json({ error: "No email template configured" }, { status: 400 });
 
   const res = await sendFamilyStatement({
     db,
