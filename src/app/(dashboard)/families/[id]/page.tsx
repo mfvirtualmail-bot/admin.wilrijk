@@ -700,10 +700,16 @@ export default function FamilyDetailPage() {
                     <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(Number(p.amount), (p.currency as Currency) ?? "EUR")}</td>
                     {canEdit && (
                       <td className="py-2 text-right">
-                        <button onClick={() => handleDeletePayment(p.id)} disabled={deletingPayment === p.id}
-                          className="text-red-500 hover:text-red-700 text-xs disabled:opacity-40">
-                          {deletingPayment === p.id ? "…" : "Delete"}
-                        </button>
+                        <div className="flex gap-2 justify-end">
+                          <Link href={`/payments/${p.id}/edit`}
+                            className="text-blue-500 hover:text-blue-700 text-xs font-medium">
+                            Edit
+                          </Link>
+                          <button onClick={() => handleDeletePayment(p.id)} disabled={deletingPayment === p.id}
+                            className="text-red-500 hover:text-red-700 text-xs disabled:opacity-40">
+                            {deletingPayment === p.id ? "…" : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>

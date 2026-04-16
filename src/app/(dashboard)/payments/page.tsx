@@ -195,10 +195,16 @@ export default function PaymentsPage() {
                     <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(Number(p.amount), (p.currency as Currency) ?? "EUR")}</td>
                     {canDelete && (
                       <td className="px-4 py-3 text-right">
-                        <button onClick={() => handleDelete(p.id)} disabled={deleting === p.id || bulkDeleting}
-                          className="text-red-500 hover:text-red-700 font-medium disabled:opacity-40">
-                          {deleting === p.id ? "…" : "Delete"}
-                        </button>
+                        <div className="flex gap-3 justify-end">
+                          <Link href={`/payments/${p.id}/edit`}
+                            className="text-blue-600 hover:text-blue-800 font-medium">
+                            Edit
+                          </Link>
+                          <button onClick={() => handleDelete(p.id)} disabled={deleting === p.id || bulkDeleting}
+                            className="text-red-500 hover:text-red-700 font-medium disabled:opacity-40">
+                            {deleting === p.id ? "…" : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
