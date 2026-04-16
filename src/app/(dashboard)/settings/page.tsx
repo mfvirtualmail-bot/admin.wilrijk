@@ -481,7 +481,15 @@ function ExchangeRatesPanel() {
     if (!res.ok) {
       setMsg(d.error ?? "Refresh failed");
     } else {
-      setMsg(`ECB ${d.date}: ${d.inserted.length} inserted, ${d.skipped.length} skipped.`);
+      const ins = d.inserted.length;
+      const parts = [`ECB ${d.date}: ${ins} inserted, ${d.skipped.length} skipped.`];
+      if (d.skipped.length > 0) {
+        const reasons = (d.skipped as Array<{ currency: string; reason: string }>)
+          .map((s) => `${s.currency}: ${s.reason}`)
+          .join("; ");
+        parts.push(reasons);
+      }
+      setMsg(parts.join(" "));
       load();
     }
     setRefreshing(false);
