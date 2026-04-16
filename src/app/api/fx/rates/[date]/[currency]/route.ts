@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateSession } from "@/lib/auth";
-import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { deleteRate } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -27,13 +28,15 @@ export async function DELETE(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
+  if (!["USD", "GBP"].includes(currency)) {
+    return NextResponse.json({ error: "Invalid currency" }, { status: 400 });
+  }
 
-  const db = createServerClient();
-  const { error } = await db
-    .from("exchange_rates")
-    .delete()
-    .eq("date", date)
-    .eq("currency", currency);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  try {
+    await deleteRate(date, currency as Currency);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

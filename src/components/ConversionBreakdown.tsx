@@ -95,12 +95,14 @@ export default function ConversionBreakdown({ label, rows, missing = 0, defaultO
           )}
           {missing > 0 && (
             <div className="mt-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded px-2 py-1.5">
-              {missing} {missing === 1 ? "item has" : "items have"} no exchange rate yet and
-              could not be added to the EUR total.{" "}
+              <strong>{missing}</strong> {missing === 1 ? "item has" : "items have"} no
+              exchange rate on file and{" "}
+              <strong>were counted at face value (1:1 to EUR)</strong> so the
+              total above is approximate. Click{" "}
               <Link href="/settings#advanced" className="underline font-medium">
-                Add or refresh rates in Advanced Settings
+                Refresh from ECB
               </Link>
-              .
+              {" "}to pull today&rsquo;s rates and the 90-day history.
             </div>
           )}
         </div>

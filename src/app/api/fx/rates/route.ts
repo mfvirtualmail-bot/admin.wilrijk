@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
-import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { listRates, putRate } from "@/lib/fx";
 import type { Currency, FxSource } from "@/lib/types";
 
 async function getSessionUser() {
@@ -22,17 +22,15 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const currency = url.searchParams.get("currency");
+  const currency = url.searchParams.get("currency") as Currency | null;
 
-  const db = createServerClient();
-  let query = db
-    .from("exchange_rates")
-    .select("date, currency, rate, source, updated_at")
-    .order("date", { ascending: false });
-  if (currency) query = query.eq("currency", currency);
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rates: data ?? [] });
+  try {
+    const rates = await listRates(currency ? { currency } : {});
+    return NextResponse.json({ rates });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
 
 /** POST /api/fx/rates   Body: { date, currency, rate, source? }
@@ -62,13 +60,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid rate" }, { status: 400 });
   }
 
-  const db = createServerClient();
-  const { error } = await db
-    .from("exchange_rates")
-    .upsert(
-      { date, currency, rate, source: source ?? "manual", updated_at: new Date().toISOString() },
-      { onConflict: "date,currency" },
-    );
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  try {
+    await putRate(date, currency, rate, source ?? "manual");
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
