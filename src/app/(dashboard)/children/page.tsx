@@ -4,8 +4,10 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { formatEur } from "@/lib/payment-utils";
+import { formatCurrency, formatEur } from "@/lib/payment-utils";
 import { familyDisplayName } from "@/lib/family-utils";
+import ConversionBreakdown, { type BreakdownRow } from "@/components/ConversionBreakdown";
+import type { Currency } from "@/lib/types";
 
 interface ChildRow {
   id: string;
@@ -14,13 +16,21 @@ interface ChildRow {
   family_id: string;
   class_name: string | null;
   monthly_tuition: number;
+  currency: Currency | null;
   is_active: boolean;
   families: { name: string; father_name: string | null } | null;
+}
+
+interface ChildrenSummary {
+  totalMonthlyEur: number;
+  missing: number;
+  breakdown: BreakdownRow[];
 }
 
 export default function ChildrenPage() {
   const { user } = useAuth();
   const [children, setChildren] = useState<ChildRow[]>([]);
+  const [summary, setSummary] = useState<ChildrenSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -33,7 +43,11 @@ export default function ChildrenPage() {
   useEffect(() => {
     fetch("/api/children")
       .then((r) => r.json())
-      .then((d) => { if (d.error) setError(d.error); else setChildren(d.children); })
+      .then((d) => {
+        if (d.error) { setError(d.error); return; }
+        setChildren(d.children);
+        if (d.summary) setSummary(d.summary);
+      })
       .catch(() => setError("Failed to load children"))
       .finally(() => setLoading(false));
   }, []);
@@ -48,7 +62,10 @@ export default function ChildrenPage() {
     );
   });
 
-  const totalMonthly = filtered.filter((c) => c.is_active).reduce((s, c) => s + Number(c.monthly_tuition), 0);
+  // Page-wide monthly total is converted to EUR server-side (summary).
+  // Filtered total is shown when a search is active, also in EUR when
+  // we have breakdown data; otherwise falls back to naive sum.
+  const totalMonthlyEur = summary?.totalMonthlyEur ?? 0;
   const canDelete = user?.is_super_admin;
 
   // Selection helpers
@@ -124,7 +141,9 @@ export default function ChildrenPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 max-w-xs px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <span className="text-sm text-gray-500">{filtered.length} students</span>
-          <span className="text-sm font-semibold text-gray-700">Monthly total: {formatEur(totalMonthly)}</span>
+          <span className="text-sm font-semibold text-gray-700" title="Sum of every active student's monthly tuition, converted to EUR at today's rate.">
+            Monthly total: {formatEur(totalMonthlyEur)}
+          </span>
           {canDelete && selectedCount > 0 && (
             <button
               onClick={handleBulkDelete}
@@ -142,8 +161,16 @@ export default function ChildrenPage() {
         {loading && <div className="text-center py-12 text-gray-500">Loading…</div>}
         {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-md p-4">{error}</div>}
 
+        {!loading && !error && summary && (
+          <ConversionBreakdown
+            label="Monthly tuition"
+            rows={summary.breakdown}
+            missing={summary.missing}
+          />
+        )}
+
         {!loading && !error && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="mt-4 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -188,7 +215,7 @@ export default function ChildrenPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{c.class_name ?? "—"}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatEur(Number(c.monthly_tuition))}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(Number(c.monthly_tuition), (c.currency as Currency) ?? "EUR")}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${c.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
                         {c.is_active ? "Active" : "Inactive"}

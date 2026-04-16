@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Header from "@/components/Header";
 import { formatEur } from "@/lib/payment-utils";
+import ConversionBreakdown, { type BreakdownRow } from "@/components/ConversionBreakdown";
 
 interface MonthlyStat {
   month: number;
@@ -30,6 +31,12 @@ interface ReportsData {
   monthlyStats: MonthlyStat[];
   methodBreakdown: Record<string, MethodEntry>;
   outstandingFamilies: OutstandingFamily[];
+  breakdown?: {
+    payments: BreakdownRow[];
+    charges: BreakdownRow[];
+    paymentsMissing: number;
+    chargesMissing: number;
+  };
 }
 
 const METHOD_NAMES: Record<string, string> = {
@@ -71,7 +78,7 @@ export default function ReportsPage() {
 
   if (!data) return null;
 
-  const { summary, monthlyStats, methodBreakdown, outstandingFamilies } = data;
+  const { summary, monthlyStats, methodBreakdown, outstandingFamilies, breakdown } = data;
   const collectionRate = summary.totalCharged > 0
     ? Math.round((summary.totalPaid / summary.totalCharged) * 100)
     : 0;
@@ -114,6 +121,20 @@ export default function ReportsPage() {
             <span>{formatEur(summary.totalPaid)} paid</span>
             <span>{formatEur(summary.totalCharged)} charged</span>
           </div>
+          {breakdown && (
+            <>
+              <ConversionBreakdown
+                label="Payments"
+                rows={breakdown.payments}
+                missing={breakdown.paymentsMissing}
+              />
+              <ConversionBreakdown
+                label="Charges"
+                rows={breakdown.charges}
+                missing={breakdown.chargesMissing}
+              />
+            </>
+          )}
         </div>
 
         {/* Monthly collection chart */}

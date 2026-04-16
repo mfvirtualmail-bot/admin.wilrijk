@@ -37,6 +37,19 @@ export default function SettingsPage() {
 
   const [tab, setTab] = useState<TabId>("general");
 
+  // Honor `#general|#methods|#advanced` in the URL so deep links from
+  // other pages (e.g. "Add rates in Advanced Settings") land on the
+  // right tab instead of the default one.
+  useEffect(() => {
+    const applyHash = () => {
+      const h = window.location.hash.replace("#", "");
+      if (h === "general" || h === "methods" || h === "advanced") setTab(h);
+    };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+  }, []);
+
   // Settings state
   const [schoolName, setSchoolName] = useState("Beit Midrash Wilrijk");
   const [methodLabels, setMethodLabels] = useState<Record<string, string>>({ ...DEFAULT_METHOD_LABELS });
