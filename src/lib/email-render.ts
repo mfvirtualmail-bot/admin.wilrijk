@@ -7,26 +7,21 @@ function fmtCurrency(n: number, currency: Currency = "EUR"): string {
   return (SYM[currency] ?? "€") + n.toLocaleString("nl-BE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/** The placeholders a template author can use inside subject + body.
- * Each entry carries a `locale` hint so the editor UI can show the right
- * set per language tab:
- *   - "en"   → English-only
- *   - "yi"   → Yiddish/Hebrew-only
- *   - "both" → useful in either language */
+/** The placeholders a template author can use inside subject + body. */
 export const TEMPLATE_PLACEHOLDERS = [
-  { key: "family_name", description: "Family surname (English)", locale: "en" as const },
-  { key: "hebrew_family_name", description: "Family surname (Hebrew)", locale: "yi" as const },
-  { key: "father_name", description: "Father's name (English)", locale: "en" as const },
-  { key: "hebrew_father_name", description: "Father's name (Hebrew)", locale: "yi" as const },
-  { key: "contact_name", description: "Best-available English contact name", locale: "en" as const },
-  { key: "hebrew_contact_name", description: "Best-available Hebrew contact name", locale: "yi" as const },
-  { key: "children_names", description: "Child first names, comma-separated (English)", locale: "en" as const },
-  { key: "hebrew_children_names", description: "Child Hebrew names, comma-separated", locale: "yi" as const },
-  { key: "balance", description: "Current balance due, formatted with currency", locale: "both" as const },
-  { key: "total_charged", description: "Total charges to date, formatted", locale: "both" as const },
-  { key: "total_paid", description: "Total payments to date, formatted", locale: "both" as const },
-  { key: "statement_date", description: "Today's date, yyyy-mm-dd", locale: "both" as const },
-  { key: "org_name", description: "Organisation name from settings", locale: "both" as const },
+  { key: "family_name", description: "Family surname (English)" },
+  { key: "hebrew_family_name", description: "Family surname (Hebrew)" },
+  { key: "father_name", description: "Father's name (English)" },
+  { key: "hebrew_father_name", description: "Father's name (Hebrew)" },
+  { key: "contact_name", description: "Best-available English contact name" },
+  { key: "hebrew_contact_name", description: "Best-available Hebrew contact name" },
+  { key: "children_names", description: "Child first names, comma-separated (English)" },
+  { key: "hebrew_children_names", description: "Child Hebrew names, comma-separated" },
+  { key: "balance", description: "Current balance due, formatted with currency" },
+  { key: "total_charged", description: "Total charges to date, formatted" },
+  { key: "total_paid", description: "Total payments to date, formatted" },
+  { key: "statement_date", description: "Today's date, yyyy-mm-dd" },
+  { key: "org_name", description: "Organisation name from settings" },
 ] as const;
 
 export type TemplateVars = Record<(typeof TEMPLATE_PLACEHOLDERS)[number]["key"], string>;
@@ -95,16 +90,13 @@ function escapeHtml(s: string): string {
 
 /** Convert the gabbai's plain-text body (with blank-line paragraphs) into a
  * branded HTML email. Safe against HTML injection — the author's text is
- * escaped first. */
+ * escaped first. Always rendered RTL with a Hebrew-capable font stack. */
 export function renderHtmlEmail(
   bodyPlain: string,
   settings: Pick<EmailSettings, "org_name" | "org_address" | "org_logo_url">,
-  locale: "en" | "yi"
 ): string {
-  const dir = locale === "yi" ? "rtl" : "ltr";
-  const fontStack = locale === "yi"
-    ? "'Noto Sans Hebrew', 'SBL Hebrew', 'Frank Ruehl CLM', Arial, sans-serif"
-    : "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif";
+  const dir = "rtl";
+  const fontStack = "'Noto Sans Hebrew', 'SBL Hebrew', 'Frank Ruehl CLM', Arial, sans-serif";
 
   const paragraphs = bodyPlain
     .split(/\n{2,}/)
@@ -120,7 +112,7 @@ export function renderHtmlEmail(
     : "";
 
   return `<!doctype html>
-<html dir="${dir}" lang="${locale}">
+<html dir="${dir}" lang="yi">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />

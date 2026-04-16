@@ -2,17 +2,25 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
 import { exportToExcel, exportTimestamp } from "@/lib/export-utils";
+import { formatEur } from "@/lib/payment-utils";
 import type { Family } from "@/lib/types";
+
+type FamilyWithBalance = Family & { balance_eur?: number };
 
 export default function FamiliesPage() {
   const { user } = useAuth();
-  const [families, setFamilies] = useState<Family[]>([]);
+  const searchParams = useSearchParams();
+  const [families, setFamilies] = useState<FamilyWithBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [openBalanceOnly, setOpenBalanceOnly] = useState(
+    searchParams.get("filter") === "open-balance",
+  );
 
   // Delete state
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -31,6 +39,7 @@ export default function FamiliesPage() {
   }, []);
 
   const filtered = families.filter((f) => {
+    if (openBalanceOnly && !((f.balance_eur ?? 0) > 0)) return false;
     const q = search.toLowerCase();
     return (
       f.name.toLowerCase().includes(q) ||
@@ -46,8 +55,8 @@ export default function FamiliesPage() {
   async function handleExport() {
     const headers = [
       "Family Name", "Father", "Mother", "Hebrew Family Name", "Hebrew Father Name",
-      "Address", "Postal Code", "City", "Phone", "Email", "Email Language",
-      "Notes", "Status",
+      "Address", "Postal Code", "City", "Phone", "Email",
+      "Open Balance (EUR)", "Notes", "Status",
     ];
     const rows: unknown[][] = [headers];
     for (const f of filtered) {
@@ -56,7 +65,7 @@ export default function FamiliesPage() {
         f.hebrew_name ?? "", f.hebrew_father_name ?? "",
         f.address ?? "", f.postal_code ?? "", f.city ?? "",
         f.phone ?? "", f.email ?? "",
-        f.language === "yi" ? "Yiddish" : "English",
+        f.balance_eur ?? 0,
         f.notes ?? "",
         f.is_active ? "Active" : "Inactive",
       ]);
@@ -126,7 +135,7 @@ export default function FamiliesPage() {
     }
   }
 
-  const colCount = canDelete ? 8 : 6;
+  const colCount = canDelete ? 9 : 7;
 
   return (
     <div>
@@ -141,6 +150,15 @@ export default function FamiliesPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 max-w-sm px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+          <label className="inline-flex items-center gap-1.5 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={openBalanceOnly}
+              onChange={(e) => setOpenBalanceOnly(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded"
+            />
+            Open balance only
+          </label>
           <span className="text-sm text-gray-500">{filtered.length} families</span>
           {canDelete && selectedCount > 0 && (
             <button
@@ -203,6 +221,7 @@ export default function FamiliesPage() {
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">City</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Phone</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Email</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600">Open Balance</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Status</th>
                   {canDelete && (
                     <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
@@ -234,6 +253,11 @@ export default function FamiliesPage() {
                     <td className="px-4 py-3 text-gray-600">{f.city ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-600">{f.phone ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-600">{f.email ?? "—"}</td>
+                    <td className={`px-4 py-3 text-right font-mono ${
+                      (f.balance_eur ?? 0) > 0 ? "text-red-600" : "text-gray-400"
+                    }`}>
+                      {f.balance_eur !== undefined ? formatEur(f.balance_eur) : "—"}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${

@@ -98,7 +98,7 @@ export default function DashboardPage() {
       bg: "bg-red-50",
       text: "text-red-600",
       icon: "⚠️",
-      href: "/payments",
+      href: "/families?filter=open-balance",
     },
   ];
 

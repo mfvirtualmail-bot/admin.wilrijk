@@ -15,9 +15,9 @@ import {
 } from "ag-grid-community";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS } from "@/lib/payment-utils";
+import { METHOD_LABELS, CURRENCY_SYMBOLS, formatCurrency } from "@/lib/payment-utils";
 import { academicYearLabel } from "@/lib/hebrew-date";
-import type { PaymentMethod } from "@/lib/types";
+import type { PaymentMethod, Currency } from "@/lib/types";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -37,6 +37,7 @@ interface MonthMeta { month: number; year: number; key: string; hebrewLabel: str
 interface SpreadsheetRow {
   familyId: string;
   familyName: string;
+  baseCurrency: Currency;
   monthlyTuition: number;
   totalCharged: number;
   totalPaid: number;
@@ -49,6 +50,7 @@ interface CellData {
   date: string | null;
   method: string | null;
   amount: number | null;
+  currency: Currency | null;
   notes: string | null;
 }
 
@@ -87,7 +89,9 @@ export default function SpreadsheetPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Save a cell change to the server
+  // Save a cell change to the server, then refetch the whole row set so
+  // the FX-converted summary totals (which depend on today's rate) stay
+  // authoritative and don't drift against the server's view.
   const saveCell = useCallback(async (
     familyId: string,
     month: number,
@@ -114,35 +118,14 @@ export default function SpreadsheetPage() {
           date: updated.date,
           notes: updated.notes,
           paymentId: updated.paymentId,
+          currency: updated.currency ?? rowNode.baseCurrency,
         }),
       });
-      const data = await res.json();
       if (!res.ok) { setSaveStatus("error"); return; }
 
-      // Update local row data with new paymentId if created
-      setRowData((prev) =>
-        prev.map((row) => {
-          if (row.familyId !== familyId) return row;
-          const prevCell = (row[monthKey] as CellData) ?? {};
-          const newCell: CellData = {
-            ...prevCell,
-            [field]: newValue,
-            paymentId: data.payment?.id ?? (data.deleted ? null : prevCell.paymentId),
-          };
-          // Recalculate totals
-          let totalPaid = 0;
-          for (const m of Object.keys(row).filter((k) => k.startsWith("m_"))) {
-            const cell = (m === monthKey ? newCell : row[m]) as CellData;
-            totalPaid += Number(cell?.amount ?? 0);
-          }
-          return {
-            ...row,
-            [monthKey]: newCell,
-            totalPaid,
-            balance: row.totalCharged - totalPaid,
-          };
-        })
-      );
+      const fresh = await fetch("/api/spreadsheet");
+      const freshData = await fresh.json();
+      if (freshData.rows) setRowData(freshData.rows);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 1500);
     } catch {
@@ -234,8 +217,8 @@ export default function SpreadsheetPage() {
           },
           {
             field: `${key}|amount`,
-            headerName: "€",
-            width: 85,
+            headerName: "Amount",
+            width: 95,
             editable: canEdit,
             type: "numericColumn",
             valueGetter: (p: ValueGetterParams) => {
@@ -243,12 +226,17 @@ export default function SpreadsheetPage() {
               return cell?.amount ?? null;
             },
             valueSetter: (p: ValueSetterParams) => {
-              if (!p.data[key]) p.data[key] = { paymentId: null, date: null, method: null, amount: null, notes: null };
+              if (!p.data[key]) p.data[key] = { paymentId: null, date: null, method: null, amount: null, currency: null, notes: null };
               const val = p.newValue === "" || p.newValue === null ? null : Number(p.newValue);
               (p.data[key] as CellData).amount = val;
               return true;
             },
-            valueFormatter: (p) => p.value != null ? `€${Number(p.value).toLocaleString("nl-BE")}` : "",
+            valueFormatter: (p) => {
+              if (p.value == null) return "";
+              const cell = p.data?.[key] as CellData | undefined;
+              const cur: Currency = cell?.currency ?? (p.data?.baseCurrency as Currency) ?? "EUR";
+              return formatCurrency(Number(p.value), cur);
+            },
             cellStyle: (p) => {
               const cell = p.data?.[key] as CellData;
               const monthlyTuition = p.data?.monthlyTuition ?? 0;
@@ -263,33 +251,41 @@ export default function SpreadsheetPage() {
       } as ColGroupDef);
     }
 
-    // Summary columns
+    // Summary columns — always in the family's base currency (the child's
+    // tuition currency). Everything paid in a different currency is
+    // converted to the base currency at today's FX rate on the server.
+    const fmtBase = (p: { value: unknown; data?: { baseCurrency?: Currency } }) => {
+      if (p.value == null || p.value === "") return "";
+      const cur: Currency = (p.data?.baseCurrency as Currency) ?? "EUR";
+      return formatCurrency(Number(p.value), cur);
+    };
+
     cols.push(
       {
         field: "totalCharged",
         headerName: "Charged",
-        width: 100,
+        width: 110,
         pinned: "right",
         editable: false,
-        valueFormatter: (p) => p.value ? `€${Number(p.value).toLocaleString("nl-BE")}` : "",
+        valueFormatter: fmtBase,
         cellStyle: { color: "#374151", fontWeight: "600" },
       },
       {
         field: "totalPaid",
         headerName: "Paid",
-        width: 90,
+        width: 100,
         pinned: "right",
         editable: false,
-        valueFormatter: (p) => p.value ? `€${Number(p.value).toLocaleString("nl-BE")}` : "",
+        valueFormatter: fmtBase,
         cellStyle: { color: "#15803d", fontWeight: "600" },
       },
       {
         field: "balance",
         headerName: "Balance",
-        width: 95,
+        width: 110,
         pinned: "right",
         editable: false,
-        valueFormatter: (p) => p.value != null ? `€${Number(p.value).toLocaleString("nl-BE")}` : "",
+        valueFormatter: fmtBase,
         cellStyle: (p) => ({
           fontWeight: "700",
           color: (p.value ?? 0) > 0 ? "#dc2626" : (p.value ?? 0) < 0 ? "#15803d" : "#374151",
@@ -311,21 +307,22 @@ export default function SpreadsheetPage() {
   // Excel export using xlsx library
   async function handleExport() {
     const { utils, writeFile } = await import("xlsx");
-    const headers = ["Family"];
+    const headers = ["Family", "Currency"];
     for (const { hebrewLabel } of months) {
-      headers.push(`${hebrewLabel} Date`, `${hebrewLabel} COM`, `${hebrewLabel} €`);
+      headers.push(`${hebrewLabel} Date`, `${hebrewLabel} COM`, `${hebrewLabel} Amount`, `${hebrewLabel} Currency`);
     }
     headers.push("Total Charged", "Total Paid", "Balance");
 
     const wsData: unknown[][] = [headers];
     for (const row of rowData) {
-      const rowArr: unknown[] = [row.familyName];
+      const rowArr: unknown[] = [row.familyName, row.baseCurrency];
       for (const { key } of months) {
         const cell = row[key] as CellData;
         rowArr.push(
           formatDateShort(cell?.date ?? null),
           cell?.method ?? "",
           cell?.amount ?? "",
+          cell?.currency ?? "",
         );
       }
       rowArr.push(row.totalCharged, row.totalPaid, row.balance);
@@ -338,9 +335,20 @@ export default function SpreadsheetPage() {
     writeFile(wb, `tuition-${academicYear}-${academicYear + 1}.xlsx`);
   }
 
-  // Summary stats
-  const totalPaidAll = rowData.reduce((s, r) => s + r.totalPaid, 0);
-  const totalDueAll = rowData.reduce((s, r) => s + Math.max(0, r.balance), 0);
+  // Per-currency grand totals. Families whose tuition is in GBP can't be
+  // meaningfully summed with EUR families, so we keep one subtotal per
+  // currency and render them side-by-side.
+  const paidByCur = new Map<Currency, number>();
+  const dueByCur = new Map<Currency, number>();
+  for (const r of rowData) {
+    paidByCur.set(r.baseCurrency, (paidByCur.get(r.baseCurrency) ?? 0) + r.totalPaid);
+    dueByCur.set(r.baseCurrency, (dueByCur.get(r.baseCurrency) ?? 0) + Math.max(0, r.balance));
+  }
+  const fmtTotals = (m: Map<Currency, number>) =>
+    Array.from(m.entries())
+      .filter(([, v]) => v > 0)
+      .map(([cur, v]) => `${CURRENCY_SYMBOLS[cur]}${v.toLocaleString("nl-BE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+      .join(" · ") || `${CURRENCY_SYMBOLS.EUR}0`;
 
   return (
     <div className="flex flex-col h-screen">
@@ -353,8 +361,8 @@ export default function SpreadsheetPage() {
         </span>
         <span className="text-gray-400">|</span>
         <span className="text-gray-600">{rowData.length} families</span>
-        <span className="text-gray-600">Total paid: <strong className="text-green-700">€{totalPaidAll.toLocaleString("nl-BE")}</strong></span>
-        <span className="text-gray-600">Total due: <strong className="text-red-600">€{totalDueAll.toLocaleString("nl-BE")}</strong></span>
+        <span className="text-gray-600">Total paid: <strong className="text-green-700">{fmtTotals(paidByCur)}</strong></span>
+        <span className="text-gray-600">Total due: <strong className="text-red-600">{fmtTotals(dueByCur)}</strong></span>
 
         <div className="ml-auto flex items-center gap-3">
           {saveStatus === "saving" && <span className="text-blue-600 text-xs animate-pulse">Saving…</span>}

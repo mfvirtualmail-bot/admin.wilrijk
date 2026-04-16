@@ -53,60 +53,34 @@ function fmt(n: number, currency: Currency = "EUR"): string {
 interface Props {
   data: StatementData;
   settings: Pick<EmailSettings, "org_name" | "org_address" | "org_logo_url" | "payment_instructions">;
-  locale: "en" | "yi";
 }
 
-const L = {
-  en: {
-    title: "Tuition Statement",
-    date: "Statement date",
-    family: "Family",
-    contact: "Contact",
-    email: "Email",
-    phone: "Phone",
-    ledger: "Ledger",
-    dateCol: "Date",
-    descriptionCol: "Description",
-    chargeCol: "Charge",
-    paymentCol: "Payment",
-    balanceCol: "Balance",
-    totalCharged: "Total charged",
-    totalPaid: "Total paid",
-    balanceDue: "Balance due",
-    paymentInstructions: "How to pay",
-    footer: "Thank you.",
-    empty: "No charges or payments to display.",
-  },
-  yi: {
-    title: "חשבון פֿאַר שכר לימוד",
-    date: "דאַטום פֿון חשבון",
-    family: "משפחה",
-    contact: "קאָנטאַקט",
-    email: "בליץ־פּאָסט",
-    phone: "טעלעפֿאָן",
-    ledger: "רעקאָרד",
-    dateCol: "דאַטום",
-    descriptionCol: "באַשרײַבונג",
-    chargeCol: "חיוב",
-    paymentCol: "באַצאָל",
-    balanceCol: "באַלאַנס",
-    totalCharged: "סך הכל חיוב",
-    totalPaid: "סך הכל באַצאָלט",
-    balanceDue: "חוב",
-    paymentInstructions: "ווי אַזוי צו באצאָלן",
-    footer: "אַ דאַנק.",
-    empty: "קיין חיובֿ אָדער באַצאָל אויף צו ווײַזן.",
-  },
+const LANG = {
+  title: "חשבון פֿאַר שכר לימוד",
+  date: "דאַטום פֿון חשבון",
+  family: "משפחה",
+  contact: "קאָנטאַקט",
+  email: "בליץ־פּאָסט",
+  phone: "טעלעפֿאָן",
+  ledger: "רעקאָרד",
+  dateCol: "דאַטום",
+  descriptionCol: "באַשרײַבונג",
+  chargeCol: "חיוב",
+  paymentCol: "באַצאָל",
+  balanceCol: "באַלאַנס",
+  totalCharged: "סך הכל חיוב",
+  totalPaid: "סך הכל באַצאָלט",
+  balanceDue: "חוב",
+  paymentInstructions: "ווי אַזוי צו באצאָלן",
+  footer: "אַ דאַנק.",
+  empty: "קיין חיובֿ אָדער באַצאָל אויף צו ווײַזן.",
 };
 
-export function StatementDocument({ data, settings, locale }: Props) {
-  // Register the Latin+Hebrew font for every render — an English PDF may
-  // still contain Hebrew glyphs (org name, child names), and Helvetica
-  // (react-pdf's default) has no Hebrew coverage.
+export function StatementDocument({ data, settings }: Props) {
   ensureNotoFont();
 
-  const rtl = locale === "yi";
-  const lang = L[locale];
+  const rtl = true;
+  const lang = LANG;
   const fontFamily = "NotoHebrew";
 
   const styles = StyleSheet.create({
@@ -154,9 +128,7 @@ export function StatementDocument({ data, settings, locale }: Props) {
     footer: { marginTop: 24, fontSize: 9, color: "#666", textAlign: rtl ? "right" : "left" },
   });
 
-  const familyName = data.family.hebrew_name && locale === "yi"
-    ? data.family.hebrew_name
-    : data.family.name;
+  const familyName = data.family.hebrew_name || data.family.name;
   const contactParts = [data.family.father_name, data.family.mother_name].filter(Boolean);
 
   return (
@@ -270,9 +242,8 @@ export function StatementDocument({ data, settings, locale }: Props) {
 export async function renderStatementPdf(
   data: StatementData,
   settings: Pick<EmailSettings, "org_name" | "org_address" | "org_logo_url" | "payment_instructions">,
-  locale: "en" | "yi"
 ): Promise<Buffer> {
-  const instance = pdf(<StatementDocument data={data} settings={settings} locale={locale} />);
+  const instance = pdf(<StatementDocument data={data} settings={settings} />);
   const stream = await instance.toBuffer();
   // @react-pdf/renderer's .toBuffer() returns a Node stream in v3; we need
   // to consume it into a single Buffer for nodemailer attachments.

@@ -5,26 +5,22 @@ import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
 import { TEMPLATE_PLACEHOLDERS } from "@/lib/email-render";
 
-type Locale = "en" | "yi";
-
 interface Template {
-  locale: Locale;
   subject: string;
   body: string;
   updated_at?: string;
 }
 
-const DEFAULTS: Record<Locale, Template> = {
-  en: { locale: "en", subject: "Tuition statement — {{family_name}}", body: "Dear {{contact_name}},\n\nPlease find attached the tuition statement dated {{statement_date}}.\n\nCurrent balance: {{balance}}.\n\nThank you,\n{{org_name}}" },
-  yi: { locale: "yi", subject: "שכר לימוד — {{hebrew_family_name}}", body: "חשובע משפחה {{hebrew_contact_name}},\n\nצוגעבונדן דעם חשבון, מיטן דאַטום {{statement_date}}.\n\nחוב: {{balance}}.\n\nאַ דאַנק,\n{{org_name}}" },
+const DEFAULT_TEMPLATE: Template = {
+  subject: "שכר לימוד — {{hebrew_family_name}}",
+  body: "חשובע משפחה {{hebrew_contact_name}},\n\nצוגעבונדן דעם חשבון, מיטן דאַטום {{statement_date}}.\n\nחוב: {{balance}}.\n\nאַ דאַנק,\n{{org_name}}",
 };
 
 export default function EmailTemplatesPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.is_super_admin ?? false;
 
-  const [locale, setLocale] = useState<Locale>("en");
-  const [templates, setTemplates] = useState<Record<Locale, Template>>(DEFAULTS);
+  const [template, setTemplate] = useState<Template>(DEFAULT_TEMPLATE);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -36,32 +32,30 @@ export default function EmailTemplatesPage() {
     fetch("/api/email/templates")
       .then((r) => r.json())
       .then((d) => {
-        if (d.templates) {
-          setTemplates((prev) => ({
-            en: d.templates.en ?? prev.en,
-            yi: d.templates.yi ?? prev.yi,
-          }));
+        if (d.template) {
+          setTemplate({
+            subject: d.template.subject ?? DEFAULT_TEMPLATE.subject,
+            body: d.template.body ?? DEFAULT_TEMPLATE.body,
+            updated_at: d.template.updated_at,
+          });
         }
       })
       .finally(() => setLoading(false));
   }, []);
 
-  const t = templates[locale];
-  const rtl = locale === "yi";
-
-  function updateCurrent(patch: Partial<Template>) {
-    setTemplates((prev) => ({ ...prev, [locale]: { ...prev[locale], ...patch } }));
+  function update(patch: Partial<Template>) {
+    setTemplate((prev) => ({ ...prev, ...patch }));
   }
 
   function insertPlaceholder(p: string) {
     const token = `{{${p}}}`;
     if (focusField === "subject") {
       const el = subjectRef.current;
-      if (!el) return updateCurrent({ subject: t.subject + token });
-      const start = el.selectionStart ?? t.subject.length;
+      if (!el) return update({ subject: template.subject + token });
+      const start = el.selectionStart ?? template.subject.length;
       const end = el.selectionEnd ?? start;
-      const next = t.subject.slice(0, start) + token + t.subject.slice(end);
-      updateCurrent({ subject: next });
+      const next = template.subject.slice(0, start) + token + template.subject.slice(end);
+      update({ subject: next });
       requestAnimationFrame(() => {
         el.focus();
         const pos = start + token.length;
@@ -69,11 +63,11 @@ export default function EmailTemplatesPage() {
       });
     } else {
       const el = bodyRef.current;
-      if (!el) return updateCurrent({ body: t.body + token });
-      const start = el.selectionStart ?? t.body.length;
+      if (!el) return update({ body: template.body + token });
+      const start = el.selectionStart ?? template.body.length;
       const end = el.selectionEnd ?? start;
-      const next = t.body.slice(0, start) + token + t.body.slice(end);
-      updateCurrent({ body: next });
+      const next = template.body.slice(0, start) + token + template.body.slice(end);
+      update({ body: next });
       requestAnimationFrame(() => {
         el.focus();
         const pos = start + token.length;
@@ -88,7 +82,7 @@ export default function EmailTemplatesPage() {
     const res = await fetch("/api/email/templates", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ locale: t.locale, subject: t.subject, body: t.body }),
+      body: JSON.stringify({ subject: template.subject, body: template.body }),
     });
     const d = await res.json().catch(() => ({}));
     setMsg(res.ok ? "Saved." : (d.error ?? "Failed to save"));
@@ -109,7 +103,7 @@ export default function EmailTemplatesPage() {
       <Header titleKey="page.settings" />
       <div className="p-6 max-w-5xl space-y-6">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Email templates</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Email template</h1>
           <p className="text-sm text-gray-500 mt-1">
             Write the email text parents will receive. Use{" "}
             <code className="font-mono bg-gray-100 px-1 rounded">{"{{placeholders}}"}</code>{" "}
@@ -117,37 +111,20 @@ export default function EmailTemplatesPage() {
           </p>
         </div>
 
-        {/* Locale tabs */}
-        <div className="flex gap-2 border-b border-gray-200">
-          {(["en", "yi"] as Locale[]).map((l) => (
-            <button
-              key={l}
-              type="button"
-              onClick={() => setLocale(l)}
-              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
-                locale === l ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {l === "en" ? "English" : "ייִדיש (Yiddish)"}
-            </button>
-          ))}
-        </div>
-
         {loading ? (
           <p className="text-gray-400 text-sm">Loading…</p>
         ) : (
           <div className="grid grid-cols-3 gap-6">
-            {/* Editor */}
             <div className="col-span-2 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
                 <input
                   ref={subjectRef}
                   type="text"
-                  value={t.subject}
-                  onChange={(e) => updateCurrent({ subject: e.target.value })}
+                  value={template.subject}
+                  onChange={(e) => update({ subject: e.target.value })}
                   onFocus={() => setFocusField("subject")}
-                  dir={rtl ? "rtl" : "ltr"}
+                  dir="rtl"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -157,12 +134,12 @@ export default function EmailTemplatesPage() {
                 <textarea
                   ref={bodyRef}
                   rows={16}
-                  value={t.body}
-                  onChange={(e) => updateCurrent({ body: e.target.value })}
+                  value={template.body}
+                  onChange={(e) => update({ body: e.target.value })}
                   onFocus={() => setFocusField("body")}
-                  dir={rtl ? "rtl" : "ltr"}
+                  dir="rtl"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-sans focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
-                  style={rtl ? { fontFamily: "'Noto Sans Hebrew', Arial, sans-serif" } : undefined}
+                  style={{ fontFamily: "'Noto Sans Hebrew', Arial, sans-serif" }}
                 />
               </div>
 
@@ -173,7 +150,7 @@ export default function EmailTemplatesPage() {
                   disabled={saving}
                   className="px-5 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {saving ? "Saving…" : `Save ${locale.toUpperCase()} template`}
+                  {saving ? "Saving…" : "Save template"}
                 </button>
                 {msg && (
                   <span className={`text-sm ${msg === "Saved." ? "text-green-600" : "text-red-600"}`}>{msg}</span>
@@ -181,32 +158,22 @@ export default function EmailTemplatesPage() {
               </div>
             </div>
 
-            {/* Placeholder palette — filtered by the selected locale so a
-                Yiddish template offers Hebrew name fields and an English
-                one offers the Latin-script versions. "Both"-tagged fields
-                (balance, dates, org name) are always shown. */}
             <aside className="bg-gray-50 rounded-lg border border-gray-200 p-4 h-fit sticky top-4">
               <h3 className="text-sm font-semibold text-gray-800 mb-2">Placeholders</h3>
-              <p className="text-xs text-gray-500 mb-3">
-                Click to insert at cursor. Showing{" "}
-                <strong>{locale === "yi" ? "Hebrew/Yiddish" : "English"}</strong>{" "}
-                fields for this template.
-              </p>
+              <p className="text-xs text-gray-500 mb-3">Click to insert at cursor.</p>
               <ul className="space-y-1.5">
-                {TEMPLATE_PLACEHOLDERS
-                  .filter((p) => p.locale === "both" || p.locale === locale)
-                  .map((p) => (
-                    <li key={p.key}>
-                      <button
-                        type="button"
-                        onClick={() => insertPlaceholder(p.key)}
-                        className="w-full text-left px-2 py-1 rounded hover:bg-white border border-transparent hover:border-gray-300 text-xs"
-                      >
-                        <code className="font-mono text-blue-700">{`{{${p.key}}}`}</code>
-                        <div className="text-gray-500 text-[11px]">{p.description}</div>
-                      </button>
-                    </li>
-                  ))}
+                {TEMPLATE_PLACEHOLDERS.map((p) => (
+                  <li key={p.key}>
+                    <button
+                      type="button"
+                      onClick={() => insertPlaceholder(p.key)}
+                      className="w-full text-left px-2 py-1 rounded hover:bg-white border border-transparent hover:border-gray-300 text-xs"
+                    >
+                      <code className="font-mono text-blue-700">{`{{${p.key}}}`}</code>
+                      <div className="text-gray-500 text-[11px]">{p.description}</div>
+                    </button>
+                  </li>
+                ))}
               </ul>
             </aside>
           </div>

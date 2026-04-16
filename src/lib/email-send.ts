@@ -21,11 +21,10 @@ export async function getEmailSettings(db: SupabaseClient): Promise<EmailSetting
   return data as EmailSettings;
 }
 
-export async function getEmailTemplate(
-  db: SupabaseClient,
-  locale: "en" | "yi"
-): Promise<EmailTemplate | null> {
-  const { data } = await db.from("email_templates").select("*").eq("locale", locale).single();
+export async function getEmailTemplate(db: SupabaseClient): Promise<EmailTemplate | null> {
+  // The app only ships one template (stored under locale="yi" for legacy
+  // reasons — the column is kept so we don't need a DB migration).
+  const { data } = await db.from("email_templates").select("*").eq("locale", "yi").single();
   return (data as EmailTemplate) ?? null;
 }
 
@@ -83,11 +82,11 @@ export async function sendFamilyStatement(opts: SendStatementOptions): Promise<S
   const vars = buildTemplateVars(data, settings);
   const subject = renderTemplate(template.subject, vars);
   const body = renderTemplate(template.body, vars);
-  const html = renderHtmlEmail(body, settings, template.locale);
+  const html = renderHtmlEmail(body, settings);
 
   let pdfBuffer: Buffer;
   try {
-    pdfBuffer = await renderStatementPdf(data, settings, template.locale);
+    pdfBuffer = await renderStatementPdf(data, settings);
   } catch (e) {
     const err = e instanceof Error ? e.message : "PDF render failed";
     await logEmail(db, {
