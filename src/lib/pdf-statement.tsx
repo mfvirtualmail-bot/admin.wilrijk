@@ -1,5 +1,6 @@
 import React from "react";
 import path from "path";
+import fs from "fs";
 import {
   Document,
   Page,
@@ -16,36 +17,30 @@ import type { EmailSettings, Currency } from "./types";
 // Register a combined Latin+Hebrew font so statements render correctly
 // regardless of locale AND so Hebrew in otherwise-English output (e.g. a
 // Hebrew organisation name, Hebrew child names) doesn't turn into mojibake.
-// @fontsource/noto-sans-hebrew ships subsets — register all relevant ones
-// under one family; react-pdf picks the right glyph per codepoint.
+// We ship the full NotoSansHebrew TTF (Latin + Hebrew glyphs) under fonts/
+// in the repo — @fontsource's woff subsets are script-specific and
+// @react-pdf handles TTF most reliably.
 let notoFontRegistered = false;
 function ensureNotoFont() {
   if (notoFontRegistered) return;
-  try {
-    const base = path.join(process.cwd(), "node_modules", "@fontsource", "noto-sans-hebrew", "files");
-    // Subsets at weight 400 + 700 (bold). Three scripts covered: Latin, Latin-ext, Hebrew.
-    const srcs400 = [
-      "noto-sans-hebrew-latin-400-normal.woff",
-      "noto-sans-hebrew-latin-ext-400-normal.woff",
-      "noto-sans-hebrew-hebrew-400-normal.woff",
-    ];
-    const srcs700 = [
-      "noto-sans-hebrew-latin-700-normal.woff",
-      "noto-sans-hebrew-latin-ext-700-normal.woff",
-      "noto-sans-hebrew-hebrew-700-normal.woff",
-    ];
-    Font.register({
-      family: "NotoHebrew",
-      fonts: [
-        ...srcs400.map((f) => ({ src: path.join(base, f), fontWeight: 400 as const })),
-        ...srcs700.map((f) => ({ src: path.join(base, f), fontWeight: 700 as const })),
-      ],
-    });
-    notoFontRegistered = true;
-  } catch {
-    // Font file missing — fall back to default Helvetica. Hebrew glyphs
-    // will render as boxes, which is a clearer failure than crashing.
+  const base = path.join(process.cwd(), "fonts");
+  const regular = path.join(base, "NotoSansHebrew-Regular.ttf");
+  const bold = path.join(base, "NotoSansHebrew-Bold.ttf");
+  // Explicit fs check — better than react-pdf's lazy fetch, which may swallow
+  // the ENOENT and silently fall back to Helvetica (the cause of mojibake).
+  if (!fs.existsSync(regular)) {
+    throw new Error(
+      `PDF font missing at ${regular}. If this is Vercel, make sure next.config.mjs includes ./fonts/** via outputFileTracingIncludes.`
+    );
   }
+  Font.register({
+    family: "NotoHebrew",
+    fonts: [
+      { src: regular, fontWeight: 400 },
+      { src: bold, fontWeight: 700 },
+    ],
+  });
+  notoFontRegistered = true;
 }
 
 const SYM: Record<Currency, string> = { EUR: "€", USD: "$", GBP: "£" };
