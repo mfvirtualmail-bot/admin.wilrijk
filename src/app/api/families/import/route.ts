@@ -16,6 +16,7 @@ interface ImportChild {
   hebrew_name: string | null;
   date_of_birth: string | null;
   monthly_tuition: number;
+  currency: string;
   notes: string | null;
 }
 
@@ -151,6 +152,7 @@ export async function POST(req: NextRequest) {
         hebrew_name: c.hebrew_name,
         date_of_birth: c.date_of_birth,
         monthly_tuition: c.monthly_tuition,
+        currency: c.currency ?? "EUR",
         notes: c.notes,
         is_active: true,
       }));
