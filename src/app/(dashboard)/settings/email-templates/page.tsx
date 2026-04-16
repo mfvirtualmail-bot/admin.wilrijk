@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
+import { TEMPLATE_PLACEHOLDERS } from "@/lib/email-render";
 
 type Locale = "en" | "yi";
 
@@ -13,21 +14,9 @@ interface Template {
   updated_at?: string;
 }
 
-const PLACEHOLDERS = [
-  { key: "family_name", desc: "Family surname" },
-  { key: "hebrew_family_name", desc: "Hebrew family name" },
-  { key: "contact_name", desc: "Father/mother name" },
-  { key: "balance", desc: "Balance due (formatted)" },
-  { key: "total_charged", desc: "Total charged" },
-  { key: "total_paid", desc: "Total paid" },
-  { key: "statement_date", desc: "Today (yyyy-mm-dd)" },
-  { key: "org_name", desc: "Organisation name" },
-  { key: "children_names", desc: "Child names, comma-separated" },
-];
-
 const DEFAULTS: Record<Locale, Template> = {
   en: { locale: "en", subject: "Tuition statement — {{family_name}}", body: "Dear {{contact_name}},\n\nPlease find attached the tuition statement dated {{statement_date}}.\n\nCurrent balance: {{balance}}.\n\nThank you,\n{{org_name}}" },
-  yi: { locale: "yi", subject: "שכר לימוד — {{family_name}}", body: "חשובע משפחה {{contact_name}},\n\nצוגעבונדן דעם חשבון, מיטן דאַטום {{statement_date}}.\n\nחוב: {{balance}}.\n\nאַ דאַנק,\n{{org_name}}" },
+  yi: { locale: "yi", subject: "שכר לימוד — {{hebrew_family_name}}", body: "חשובע משפחה {{hebrew_contact_name}},\n\nצוגעבונדן דעם חשבון, מיטן דאַטום {{statement_date}}.\n\nחוב: {{balance}}.\n\nאַ דאַנק,\n{{org_name}}" },
 };
 
 export default function EmailTemplatesPage() {
@@ -192,23 +181,32 @@ export default function EmailTemplatesPage() {
               </div>
             </div>
 
-            {/* Placeholder palette */}
+            {/* Placeholder palette — filtered by the selected locale so a
+                Yiddish template offers Hebrew name fields and an English
+                one offers the Latin-script versions. "Both"-tagged fields
+                (balance, dates, org name) are always shown. */}
             <aside className="bg-gray-50 rounded-lg border border-gray-200 p-4 h-fit sticky top-4">
               <h3 className="text-sm font-semibold text-gray-800 mb-2">Placeholders</h3>
-              <p className="text-xs text-gray-500 mb-3">Click to insert at cursor.</p>
+              <p className="text-xs text-gray-500 mb-3">
+                Click to insert at cursor. Showing{" "}
+                <strong>{locale === "yi" ? "Hebrew/Yiddish" : "English"}</strong>{" "}
+                fields for this template.
+              </p>
               <ul className="space-y-1.5">
-                {PLACEHOLDERS.map((p) => (
-                  <li key={p.key}>
-                    <button
-                      type="button"
-                      onClick={() => insertPlaceholder(p.key)}
-                      className="w-full text-left px-2 py-1 rounded hover:bg-white border border-transparent hover:border-gray-300 text-xs"
-                    >
-                      <code className="font-mono text-blue-700">{`{{${p.key}}}`}</code>
-                      <div className="text-gray-500 text-[11px]">{p.desc}</div>
-                    </button>
-                  </li>
-                ))}
+                {TEMPLATE_PLACEHOLDERS
+                  .filter((p) => p.locale === "both" || p.locale === locale)
+                  .map((p) => (
+                    <li key={p.key}>
+                      <button
+                        type="button"
+                        onClick={() => insertPlaceholder(p.key)}
+                        className="w-full text-left px-2 py-1 rounded hover:bg-white border border-transparent hover:border-gray-300 text-xs"
+                      >
+                        <code className="font-mono text-blue-700">{`{{${p.key}}}`}</code>
+                        <div className="text-gray-500 text-[11px]">{p.description}</div>
+                      </button>
+                    </li>
+                  ))}
               </ul>
             </aside>
           </div>
