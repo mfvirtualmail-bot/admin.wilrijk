@@ -325,23 +325,37 @@ const SUPPORTED = new Set<Currency>(["USD", "GBP"]);
 /**
  * Fetch ECB reference rates and upsert them into the settings JSON.
  *
- * By default we pull the 90-day history so historical payments/charges
- * have rates to match against on first deploy. Pass `{ range: "daily" }`
- * to only grab today's rate (smaller payload for cron).
+ * Ranges:
+ *   - "daily"   → today only (tiny payload; used by the nightly cron)
+ *   - "90d"     → last 90 calendar days (~60 KB)
+ *   - "2y"      → last 2 years (default; fetches the full history file
+ *                 and filters client-side so the stored map stays
+ *                 bounded — ECB doesn't publish a 2-year file directly)
  *
  * `force = true` overwrites existing rows (manual edits included).
  * Default only writes rates the map doesn't have yet.
  */
 export async function fetchEcbDailyRates(
-  opts: { force?: boolean; range?: "daily" | "90d" } = {},
+  opts: { force?: boolean; range?: "daily" | "90d" | "2y" } = {},
 ): Promise<{
   date: string;             // most recent date written
   inserted: Array<{ date: string; currency: string; rate: number }>;
   skipped: Array<{ date: string; currency: string; reason: string }>;
 }> {
-  const url = opts.range === "daily"
-    ? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
-    : "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml";
+  const range = opts.range ?? "2y";
+  const url =
+    range === "daily" ? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+    : range === "90d" ? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml"
+    : "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.xml";
+
+  // For the 2-year range, cut anything older than this. Gives a clean
+  // rolling window regardless of when the fetch runs.
+  const cutoffIso = (() => {
+    if (range !== "2y") return null;
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 2);
+    return d.toISOString().slice(0, 10);
+  })();
 
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`ECB fetch failed: HTTP ${res.status}`);
@@ -357,6 +371,9 @@ export async function fetchEcbDailyRates(
   let dayMatch: RegExpExecArray | null;
   while ((dayMatch = dayBlockRe.exec(xml)) !== null) {
     const date = dayMatch[1];
+    // Trim early when a cutoff is in effect — the full history file is
+    // ~25 years and we only need the rolling 2-year window.
+    if (cutoffIso && date < cutoffIso) continue;
     const inner = dayMatch[2];
     let rm: RegExpExecArray | null;
     while ((rm = innerRateRe.exec(inner)) !== null) {
@@ -373,12 +390,14 @@ export async function fetchEcbDailyRates(
     const flatDate = xml.match(/<Cube\s+time\s*=\s*["'](\d{4}-\d{2}-\d{2})["']/);
     if (!flatDate) throw new Error("ECB XML missing <Cube time=...>");
     const date = flatDate[1];
-    const flatRe = /<Cube\s+currency\s*=\s*["']([A-Z]{3})["']\s+rate\s*=\s*["']([\d.]+)["']\s*\/?>/g;
-    let fm: RegExpExecArray | null;
-    while ((fm = flatRe.exec(xml)) !== null) {
-      const currency = fm[1] as Currency;
-      if (!SUPPORTED.has(currency)) continue;
-      parsed.push({ date, currency, rate: parseFloat(fm[2]) });
+    if (!cutoffIso || date >= cutoffIso) {
+      const flatRe = /<Cube\s+currency\s*=\s*["']([A-Z]{3})["']\s+rate\s*=\s*["']([\d.]+)["']\s*\/?>/g;
+      let fm: RegExpExecArray | null;
+      while ((fm = flatRe.exec(xml)) !== null) {
+        const currency = fm[1] as Currency;
+        if (!SUPPORTED.has(currency)) continue;
+        parsed.push({ date, currency, rate: parseFloat(fm[2]) });
+      }
     }
   }
 

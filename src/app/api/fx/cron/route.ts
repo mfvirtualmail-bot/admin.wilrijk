@@ -19,7 +19,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await fetchEcbDailyRates({ force: false });
+    // Nightly cron only needs today's rate — the full 2-year backfill
+    // runs on demand from the Advanced-settings "Refresh from ECB" button.
+    const result = await fetchEcbDailyRates({ force: false, range: "daily" });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
