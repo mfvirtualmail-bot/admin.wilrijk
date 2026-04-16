@@ -135,9 +135,22 @@ export default function SpreadsheetPage() {
 
   const onCellValueChanged = useCallback((event: CellValueChangedEvent) => {
     if (!canEdit) return;
-    const { colDef, data, newValue } = event;
+    const { colDef, data, newValue, oldValue } = event;
     const field = colDef.field as string;
     if (!field || !field.includes("|")) return;
+
+    // Second line of defence against an invalid amount edit destroying a
+    // payment: if the amount field got NaN past the value setter, treat
+    // the edit as a no-op (same value as before) so the API call never
+    // converts a typo into a delete.
+    if (field.endsWith("|amount")) {
+      const isExplicitClear = newValue === null || newValue === "" || newValue === undefined;
+      const isValidNumber = typeof newValue === "number" && Number.isFinite(newValue);
+      if (!isExplicitClear && !isValidNumber) {
+        event.node?.setDataValue(colDef.field as string, oldValue);
+        return;
+      }
+    }
 
     const [monthKey, subField] = field.split("|");
     const [, monthStr, yearStr] = monthKey.split("_");
@@ -227,7 +240,16 @@ export default function SpreadsheetPage() {
             },
             valueSetter: (p: ValueSetterParams) => {
               if (!p.data[key]) p.data[key] = { paymentId: null, date: null, method: null, amount: null, currency: null, notes: null };
-              const val = p.newValue === "" || p.newValue === null ? null : Number(p.newValue);
+              // An explicit empty clear means "delete this payment"; anything
+              // non-numeric (e.g. the user tried to rewrite "$100" as "€100")
+              // is rejected so we never silently wipe a payment + its method
+              // + its date because of a typo.
+              if (p.newValue === "" || p.newValue === null || p.newValue === undefined) {
+                (p.data[key] as CellData).amount = null;
+                return true;
+              }
+              const val = Number(p.newValue);
+              if (!Number.isFinite(val)) return false;
               (p.data[key] as CellData).amount = val;
               return true;
             },
