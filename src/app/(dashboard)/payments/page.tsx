@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { METHOD_COLORS, MONTHS, formatDate, formatCurrency } from "@/lib/payment-utils";
 import { usePaymentMethods } from "@/lib/use-settings";
 import { familyDisplayName } from "@/lib/family-utils";
+import { exportToExcel, exportTimestamp, formatDateForExport } from "@/lib/export-utils";
 import type { Payment, Currency } from "@/lib/types";
 
 type PaymentWithFamily = Payment & { families: { name: string; father_name: string | null } | null };
@@ -50,6 +51,24 @@ export default function PaymentsPage() {
   const total = filtered.reduce((s, p) => s + Number(p.amount), 0);
   const canAdd = user?.is_super_admin;
   const canDelete = user?.is_super_admin;
+
+  async function handleExport() {
+    const headers = ["Date", "Family", "Father", "Method", "Period", "Currency", "Amount", "Notes"];
+    const rows: unknown[][] = [headers];
+    for (const p of filtered) {
+      rows.push([
+        formatDateForExport(p.payment_date),
+        p.families?.name ?? "",
+        p.families?.father_name ?? "",
+        methodLabels[p.payment_method] ?? p.payment_method,
+        p.month && p.year ? `${MONTHS[p.month]} ${p.year}` : "",
+        (p.currency as Currency) ?? "EUR",
+        Number(p.amount),
+        p.notes ?? "",
+      ]);
+    }
+    await exportToExcel(`payments-${exportTimestamp()}`, [{ name: "Payments", rows }]);
+  }
 
   // Selection helpers
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
@@ -123,6 +142,14 @@ export default function PaymentsPage() {
               {bulkDeleting ? "Deleting…" : `Delete ${selectedCount} selected`}
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className={`${canAdd ? "" : "ml-auto"} px-4 py-2 border border-green-600 text-green-700 rounded-md hover:bg-green-50 font-medium text-sm disabled:opacity-40`}
+          >
+            Export Excel
+          </button>
           {canAdd && (
             <>
               <Link

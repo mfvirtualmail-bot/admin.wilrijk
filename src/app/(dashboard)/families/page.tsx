@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
+import { exportToExcel, exportTimestamp } from "@/lib/export-utils";
 import type { Family } from "@/lib/types";
 
 export default function FamiliesPage() {
@@ -41,6 +42,27 @@ export default function FamiliesPage() {
   });
 
   const canDelete = user?.is_super_admin;
+
+  async function handleExport() {
+    const headers = [
+      "Family Name", "Father", "Mother", "Hebrew Family Name", "Hebrew Father Name",
+      "Address", "Postal Code", "City", "Phone", "Email", "Email Language",
+      "Notes", "Status",
+    ];
+    const rows: unknown[][] = [headers];
+    for (const f of filtered) {
+      rows.push([
+        f.name, f.father_name ?? "", f.mother_name ?? "",
+        f.hebrew_name ?? "", f.hebrew_father_name ?? "",
+        f.address ?? "", f.postal_code ?? "", f.city ?? "",
+        f.phone ?? "", f.email ?? "",
+        f.language === "yi" ? "Yiddish" : "English",
+        f.notes ?? "",
+        f.is_active ? "Active" : "Inactive",
+      ]);
+    }
+    await exportToExcel(`families-${exportTimestamp()}`, [{ name: "Families", rows }]);
+  }
 
   // Selection helpers
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
@@ -129,6 +151,14 @@ export default function FamiliesPage() {
               {bulkDeleting ? "Deleting…" : `Delete ${selectedCount} selected`}
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className={`${canDelete ? "" : "ml-auto"} px-4 py-2 border border-green-600 text-green-700 rounded-md hover:bg-green-50 font-medium text-sm disabled:opacity-40`}
+          >
+            Export Excel
+          </button>
           {canDelete && (
             <>
               <Link
