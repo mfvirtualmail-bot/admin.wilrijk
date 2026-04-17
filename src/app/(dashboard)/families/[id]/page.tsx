@@ -262,7 +262,13 @@ export default function FamilyDetailPage() {
   if (error) return <div className="p-8 text-red-600">{error}</div>;
   if (!data) return null;
 
-  const { family, children, payments, balance } = data;
+  const { family, children, balance } = data;
+  const payments = [...data.payments].sort((a, b) => {
+    const ak = a.year && a.month ? a.year * 12 + a.month : 0;
+    const bk = b.year && b.month ? b.year * 12 + b.month : 0;
+    if (ak !== bk) return ak - bk;
+    return a.payment_date.localeCompare(b.payment_date);
+  });
 
   return (
     <div>

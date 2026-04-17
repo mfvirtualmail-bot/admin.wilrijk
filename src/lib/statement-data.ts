@@ -1,9 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Family, Child, Charge, Payment, Currency } from "./types";
+import { hebrewMonthLabel } from "./hebrew-date";
 
 export interface StatementLine {
   date: string;           // ISO date for sorting
-  label: string;          // e.g. "Sep 2025 — David (charge)" or "Payment (cash)"
+  displayDate: string;    // Hebrew rendered date for the Date column
+  label: string;          // description column (child name for charges, תשלום for payments)
   charge: number;         // positive for charges
   payment: number;        // positive for payments
   balance: number;        // running balance (charges - payments)
@@ -52,32 +54,48 @@ export async function buildFamilyStatement(
 
   const childNameById = new Map<string, string>();
   for (const c of children) {
+    const hebrew = c.hebrew_name?.trim() || "";
     const first = c.first_name?.trim() || "";
     const last = c.last_name?.trim() || "";
-    childNameById.set(c.id, `${first} ${last}`.trim() || "Student");
+    const fallback = `${first} ${last}`.trim() || "תלמיד";
+    childNameById.set(c.id, hebrew || fallback);
   }
 
-  type Row = { date: string; label: string; charge: number; payment: number };
+  type Row = { date: string; displayDate: string; label: string; charge: number; payment: number };
   const rows: Row[] = [];
 
   for (const ch of charges) {
     const key = Number(ch.year) * 12 + Number(ch.month);
     if (key > currentKey) continue;
-    // Use 1st of the charge month as the ledger date
+    // Use 1st of the charge month as the ledger date (for sorting)
     const iso = `${ch.year}-${String(ch.month).padStart(2, "0")}-01`;
-    const childName = childNameById.get(ch.child_id) ?? "Student";
+    const childName = childNameById.get(ch.child_id) ?? "תלמיד";
     rows.push({
       date: iso,
-      label: `${monthName(ch.month)} ${ch.year} — ${childName}`,
+      displayDate: hebrewMonthLabel(Number(ch.month), Number(ch.year)),
+      label: childName,
       charge: Number(ch.amount),
       payment: 0,
     });
   }
 
   for (const p of payments) {
+    // Derive the Hebrew month label from the payment's allocated period if present,
+    // otherwise from the payment date itself.
+    let pMonth: number;
+    let pYear: number;
+    if (p.month && p.year) {
+      pMonth = Number(p.month);
+      pYear = Number(p.year);
+    } else {
+      const d = new Date(p.payment_date);
+      pMonth = d.getMonth() + 1;
+      pYear = d.getFullYear();
+    }
     rows.push({
       date: p.payment_date,
-      label: `Payment (${p.payment_method})`,
+      displayDate: hebrewMonthLabel(pMonth, pYear),
+      label: "תשלום",
       charge: 0,
       payment: Number(p.amount),
     });
@@ -111,6 +129,3 @@ export async function buildFamilyStatement(
   };
 }
 
-function monthName(m: number): string {
-  return ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m] ?? String(m);
-}
