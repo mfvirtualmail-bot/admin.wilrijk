@@ -4,9 +4,15 @@ import { snapshotEurFields } from "./fx";
 import type { Currency } from "./types";
 
 /**
- * Generate charges for a single child based on their monthly_tuition and enrollment period.
- * Uses upsert with ignoreDuplicates to safely skip already-existing charges.
- * Returns the number of charges created.
+ * Generate monthly charges for one student.
+ *
+ * Rule (as of this revision): charges run from the student's enrollment
+ * START month/year up to min(enrollment_end, today). Future months are
+ * never pre-billed; months outside an explicit enrollment window are
+ * never billed.
+ *
+ * Uses upsert with ignoreDuplicates so it's safe to call repeatedly —
+ * existing (child_id, month, year) rows aren't overwritten.
  */
 export async function generateChargesForChild(
   db: SupabaseClient,
@@ -18,17 +24,14 @@ export async function generateChargesForChild(
   startYear: number | null,
   endMonth: number | null,
   endYear: number | null,
-  baseYear: number
 ): Promise<number> {
   if (monthlyTuition <= 0) return 0;
 
-  const months = getEnrollmentMonths(startMonth, startYear, endMonth, endYear, baseYear);
+  const months = getEnrollmentMonths(startMonth, startYear, endMonth, endYear);
   if (months.length === 0) return 0;
 
-  // Snapshot the EUR equivalent for each month using the rate as of the
-  // first day of that month, so future reads never have to re-resolve FX
-  // for these charges (and never silently drop them when no rate exists
-  // for that date later).
+  // Snapshot the EUR equivalent at the rate for each month's first day,
+  // so reads never need to re-resolve FX later.
   const rows = await Promise.all(
     months.map(async ({ month, year }) => {
       const date = `${year}-${String(month).padStart(2, "0")}-01`;
@@ -58,8 +61,14 @@ export async function generateChargesForChild(
 }
 
 /**
- * Regenerate charges for a child: delete existing charges for the academic year,
- * then create new ones based on current tuition and enrollment period.
+ * Delete every charge for this child, then generate from scratch using
+ * the current enrollment window. Called on PUT /api/children/[id] when
+ * tuition or enrollment dates change, and on the "Regenerate charges"
+ * button to clean up over-billed students.
+ *
+ * Safety: this is destructive — any charge rows outside the new
+ * enrollment window are removed. Payments are NOT touched; they link to
+ * families by (family_id, month, year) and have no hard FK to charges.
  */
 export async function regenerateChargesForChild(
   db: SupabaseClient,
@@ -71,24 +80,19 @@ export async function regenerateChargesForChild(
   startYear: number | null,
   endMonth: number | null,
   endYear: number | null,
-  baseYear: number
 ): Promise<number> {
-  // Delete existing charges for this child in the academic year range
-  const months = getEnrollmentMonths(null, null, null, null, baseYear); // full year range
-  for (const { month, year } of months) {
-    await db.from("charges").delete().match({ child_id: childId, month, year });
-  }
-
-  // Generate new charges
+  const { error: delErr } = await db.from("charges").delete().eq("child_id", childId);
+  if (delErr) throw new Error(`Failed to clear charges: ${delErr.message}`);
   return generateChargesForChild(
     db, childId, familyId, monthlyTuition, currency,
-    startMonth, startYear, endMonth, endYear, baseYear
+    startMonth, startYear, endMonth, endYear,
   );
 }
 
 /**
- * Get the current academic base year. If we're in Sep-Dec, the base year is current year.
- * If we're in Jan-Aug, the base year is previous year.
+ * Current academic base year (Sep..Aug convention). Retained for UIs
+ * that still display by academic year; charge generation no longer
+ * uses this.
  */
 export function getCurrentBaseYear(): number {
   const now = new Date();

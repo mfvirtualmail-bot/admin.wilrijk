@@ -826,28 +826,28 @@ function SnapshotStatusPanel() {
   //        a charge-generation failure.
   async function handleRegenerateCharges() {
     if (!confirm(
-      "Regenerate monthly charges for ALL active students across the last few academic years? " +
-      "Existing charges are preserved — only missing months will be created.",
+      "Regenerate monthly charges for EVERY active student? This WIPES each " +
+      "student's existing charges and rebuilds them from enrollment_start up " +
+      "to min(enrollment_end, today). Use this to clean up students whose " +
+      "charges extend outside their real enrollment window. Payments are NOT " +
+      "touched.",
     )) return;
     setRegenerating(true);
     setErr(null);
     setProgress("Regenerating charges for all students…");
     try {
-      const res = await fetch("/api/charges/regenerate-all", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ years: 3 }),
-      });
+      const res = await fetch("/api/charges/regenerate-all", { method: "POST" });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? "Regenerate failed");
       const parts = [
         `Created ${d.created} charge(s) across ${d.studentsProcessed} student(s)`,
       ];
-      if (d.studentsSkipped > 0) parts.push(`${d.studentsSkipped} skipped (no tuition)`);
+      const sk = d.skippedReasons ?? {};
+      if ((sk.noTuition ?? 0) > 0) parts.push(`${sk.noTuition} skipped (no tuition)`);
+      if ((sk.noEnrollmentStart ?? 0) > 0) parts.push(`${sk.noEnrollmentStart} skipped (no enrollment start)`);
       if ((d.failures as unknown[]).length > 0) {
         parts.push(`${(d.failures as unknown[]).length} student(s) failed`);
       }
-      parts.push(`covering years ${(d.academicYearsCovered as number[]).join(", ")}`);
       setProgress(parts.join(" — "));
     } catch (e) {
       setErr((e as Error).message);

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { generateChargesForChild, getCurrentBaseYear } from "@/lib/charge-utils";
+import { generateChargesForChild } from "@/lib/charge-utils";
 import { convertManyToEur } from "@/lib/fx";
 import type { Currency } from "@/lib/types";
 
@@ -108,17 +108,20 @@ export async function POST(req: NextRequest) {
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Auto-generate charges for this child
+  // Auto-generate charges for this child from enrollment_start up to
+  // min(enrollment_end, today). Errors are logged but don't fail the
+  // student insert — a missing FX rate shouldn't block admin intake.
   if (data && Number(data.monthly_tuition) > 0) {
     try {
       const childCurrency = data.currency ?? "EUR";
-      const baseYear = getCurrentBaseYear();
       await generateChargesForChild(
         db, data.id, family_id, Number(data.monthly_tuition), childCurrency,
         data.enrollment_start_month, data.enrollment_start_year,
-        data.enrollment_end_month, data.enrollment_end_year, baseYear
+        data.enrollment_end_month, data.enrollment_end_year,
       );
-    } catch { /* charge generation is best-effort */ }
+    } catch (e) {
+      console.error("[children POST] charge generation failed:", (e as Error).message);
+    }
   }
 
   return NextResponse.json({ child: data }, { status: 201 });
