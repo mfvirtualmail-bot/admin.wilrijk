@@ -11,18 +11,26 @@ import {
 } from "@/lib/fx";
 
 /**
- * POST /api/fx/rebuild-snapshots
+ * POST /api/fx/rebuild-snapshots?limit=N&include=fallback
  *
  * Durable backfill of `eur_amount / eur_rate / eur_rate_date /
- * eur_rate_kind` for every payment + charge row where they're NULL.
- * Hot paths (dashboard, spreadsheet, reports) no longer self-heal —
- * they compute EUR in memory — so this endpoint is the one place
- * that writes snapshots back to the DB.
+ * eur_rate_kind` for payment + charge rows. Hot paths no longer
+ * self-heal — they compute EUR in memory — so this endpoint is the
+ * single place that writes snapshots back to the DB.
  *
- * Accepts `?limit=N` (default 500) so extremely large datasets can be
- * walked in batches without timing out a single serverless invocation.
- * Returns `{ updatedPayments, updatedCharges, remainingPayments,
- * remainingCharges }` so the caller knows whether to invoke it again.
+ * By default operates on rows where `eur_amount IS NULL`.
+ *
+ * With `?include=fallback` it ALSO includes rows whose current
+ * `eur_rate_kind = 'fallback'` — i.e. rows whose snapshot used a later
+ * rate because no historical one was available at write time. After
+ * you backfill historical ECB rates (via /api/fx/fetch-history), pass
+ * `include=fallback` to re-snapshot those rows at the correct
+ * historical rate. `manual` rows are NEVER touched — those were set
+ * deliberately by an operator.
+ *
+ * `?limit=N` (default 500) caps rows-per-call to avoid serverless
+ * timeouts. Returns `{updatedPayments, updatedCharges,
+ * remainingPayments, remainingCharges}` so the caller can loop.
  */
 export async function POST(req: Request) {
   const token = cookies().get("session")?.value;
@@ -36,11 +44,32 @@ export async function POST(req: Request) {
 
   const url = new URL(req.url);
   const limit = Math.max(1, Math.min(5000, Number(url.searchParams.get("limit") ?? 500)));
+  const includeFallback = url.searchParams.get("include") === "fallback";
 
   const db = createServerClient();
 
   // Kick ECB once to maximise our chances of having rates.
   try { await ensureEcbRefreshed(); } catch { /* keep going even if ECB is down */ }
+
+  // If we're resnapshotting fallback rows, NULL them out first so the
+  // standard `is eur_amount null` path picks them up. Note the
+  // unqualified (fallback) NULL — we explicitly DO NOT touch 'manual'.
+  if (includeFallback) {
+    await Promise.all([
+      db.from("payments").update({
+        eur_amount: null,
+        eur_rate: null,
+        eur_rate_date: null,
+        eur_rate_kind: null,
+      }).eq("eur_rate_kind", "fallback"),
+      db.from("charges").update({
+        eur_amount: null,
+        eur_rate: null,
+        eur_rate_date: null,
+        eur_rate_kind: null,
+      }).eq("eur_rate_kind", "fallback"),
+    ]);
+  }
 
   const [{ data: payRows, error: payErr }, { data: chgRows, error: chgErr }] = await Promise.all([
     db

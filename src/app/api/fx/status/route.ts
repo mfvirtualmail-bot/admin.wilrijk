@@ -25,12 +25,16 @@ export async function GET() {
     { count: missingCharges },
     { count: totalPayments },
     { count: totalCharges },
+    { count: fallbackPayments },
+    { count: fallbackCharges },
     latestRates,
   ] = await Promise.all([
     db.from("payments").select("id", { count: "exact", head: true }).is("eur_amount", null),
     db.from("charges").select("id", { count: "exact", head: true }).is("eur_amount", null),
     db.from("payments").select("id", { count: "exact", head: true }),
     db.from("charges").select("id", { count: "exact", head: true }),
+    db.from("payments").select("id", { count: "exact", head: true }).eq("eur_rate_kind", "fallback"),
+    db.from("charges").select("id", { count: "exact", head: true }).eq("eur_rate_kind", "fallback"),
     getLatestKnownRates(),
   ]);
 
@@ -48,5 +52,7 @@ export async function GET() {
     missingCharges: missingCharges ?? 0,
     totalPayments: totalPayments ?? 0,
     totalCharges: totalCharges ?? 0,
+    fallbackPayments: fallbackPayments ?? 0,
+    fallbackCharges: fallbackCharges ?? 0,
   });
 }
