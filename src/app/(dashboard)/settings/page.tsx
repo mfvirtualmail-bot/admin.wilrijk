@@ -510,6 +510,8 @@ function ExchangeRatesPanel() {
 
   return (
     <div className="space-y-5">
+      <SnapshotStatusPanel />
+
       <div>
         <h3 className="text-base font-semibold text-gray-900 mb-1">Exchange Rates</h3>
         <p className="text-xs text-gray-500">
@@ -660,6 +662,295 @@ function ExchangeRatesPanel() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Snapshot status + rebuild
+
+interface FxStatus {
+  today: string;
+  rates: Array<{
+    currency: "USD" | "GBP";
+    rate: number;
+    rateDate: string;
+    source: FxSource;
+    daysOld: number;
+  }>;
+  missingPayments: number;
+  missingCharges: number;
+  totalPayments: number;
+  totalCharges: number;
+}
+
+function SnapshotStatusPanel() {
+  const [status, setStatus] = useState<FxStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [fetchingEcb, setFetchingEcb] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/fx/status");
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Failed to load");
+      setStatus(d);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  // --- 1. Fetch ECB rates now. Surfaces any error so the operator can
+  //        see whether ECB is actually reachable from the server.
+  async function handleEcb(force: boolean) {
+    setFetchingEcb(true);
+    setErr(null);
+    setProgress("Fetching ECB rates…");
+    try {
+      const res = await fetch(`/api/fx/refresh${force ? "?force=1" : ""}`, { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "ECB refresh failed");
+      const ins = (d.inserted as Array<{ currency: string }>).length;
+      const skipped = (d.skipped as Array<{ currency: string; reason: string }>) ?? [];
+      const parts = [`ECB ${d.date}: ${ins} inserted`];
+      if (skipped.length > 0) {
+        parts.push(
+          "skipped: " + skipped.map((s) => `${s.currency} (${s.reason})`).join(", "),
+        );
+      }
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setFetchingEcb(false);
+      load();
+    }
+  }
+
+  // --- 2. Regenerate charge rows for every active student across the
+  //        last few academic years. Fixes the "family shows €0 charged"
+  //        case where the original /api/children POST silently swallowed
+  //        a charge-generation failure.
+  async function handleRegenerateCharges() {
+    if (!confirm(
+      "Regenerate monthly charges for ALL active students across the last few academic years? " +
+      "Existing charges are preserved — only missing months will be created.",
+    )) return;
+    setRegenerating(true);
+    setErr(null);
+    setProgress("Regenerating charges for all students…");
+    try {
+      const res = await fetch("/api/charges/regenerate-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ years: 3 }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Regenerate failed");
+      const parts = [
+        `Created ${d.created} charge(s) across ${d.studentsProcessed} student(s)`,
+      ];
+      if (d.studentsSkipped > 0) parts.push(`${d.studentsSkipped} skipped (no tuition)`);
+      if ((d.failures as unknown[]).length > 0) {
+        parts.push(`${(d.failures as unknown[]).length} student(s) failed`);
+      }
+      parts.push(`covering years ${(d.academicYearsCovered as number[]).join(", ")}`);
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setRegenerating(false);
+      load();
+    }
+  }
+
+  // --- 3. Rebuild eur_amount for all payment/charge rows that are NULL.
+  //        Loops the batched endpoint until nothing remains. Stops if a
+  //        pass writes zero rows (means no rate is available — user
+  //        needs to add one manually or fetch ECB first).
+  async function handleRebuild() {
+    setRebuilding(true);
+    setErr(null);
+    setProgress("Starting…");
+    let totalPayments = 0;
+    let totalCharges = 0;
+    try {
+      for (let i = 0; i < 40; i++) {
+        const res = await fetch("/api/fx/rebuild-snapshots?limit=500", { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? "Rebuild failed");
+        totalPayments += d.updatedPayments ?? 0;
+        totalCharges += d.updatedCharges ?? 0;
+        const remaining = (d.remainingPayments ?? 0) + (d.remainingCharges ?? 0);
+        setProgress(
+          `Pass ${i + 1}: wrote ${d.updatedPayments} payment(s) + ${d.updatedCharges} charge(s); ${remaining} row(s) still pending`,
+        );
+        if (remaining === 0) break;
+        if ((d.updatedPayments ?? 0) + (d.updatedCharges ?? 0) === 0) {
+          throw new Error(
+            `Stopped — ${remaining} row(s) still have no usable rate. Fetch ECB above or add the missing rate in the Exchange Rates table below.`,
+          );
+        }
+      }
+      setProgress(`Done. Wrote ${totalPayments} payment(s) + ${totalCharges} charge(s).`);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setRebuilding(false);
+      load();
+    }
+  }
+
+  const anyMissing = status && (status.missingPayments > 0 || status.missingCharges > 0);
+  const ratesStale = status?.rates.some((r) => r.daysOld > 7) ?? false;
+  const noRates = (status?.rates.length ?? 0) === 0;
+  const anyBusy = rebuilding || regenerating || fetchingEcb;
+
+  return (
+    <div className="border border-gray-200 rounded-md p-4 bg-white">
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">Data integrity</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Three one-shot actions for when dashboard/reports totals look wrong.
+            All of them are idempotent — running twice won&apos;t duplicate anything.
+          </p>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="text-xs text-blue-600 hover:underline disabled:opacity-40"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {loading && !status && <p className="text-sm text-gray-400">Loading…</p>}
+
+      {status && (
+        <div className="space-y-4">
+          {/* Live numbers. */}
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className={`rounded border p-3 ${status.missingPayments > 0 ? "border-amber-200 bg-amber-50" : "border-green-200 bg-green-50"}`}>
+              <div className="text-xs text-gray-600">Payments without EUR snapshot</div>
+              <div className="text-xl font-bold text-gray-900">
+                {status.missingPayments.toLocaleString()}{" "}
+                <span className="text-sm font-normal text-gray-500">
+                  / {status.totalPayments.toLocaleString()}
+                </span>
+              </div>
+            </div>
+            <div className={`rounded border p-3 ${status.missingCharges > 0 ? "border-amber-200 bg-amber-50" : "border-green-200 bg-green-50"}`}>
+              <div className="text-xs text-gray-600">Charges without EUR snapshot</div>
+              <div className="text-xl font-bold text-gray-900">
+                {status.missingCharges.toLocaleString()}{" "}
+                <span className="text-sm font-normal text-gray-500">
+                  / {status.totalCharges.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* ECB rate status. */}
+          <div
+            className={
+              "rounded border p-3 " +
+              (noRates
+                ? "border-red-200 bg-red-50"
+                : ratesStale
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-gray-200 bg-gray-50")
+            }
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="text-xs text-gray-700 flex-1">
+                <div className="font-semibold mb-0.5">ECB rates</div>
+                {noRates ? (
+                  <span>No USD or GBP rate is stored. Foreign-currency rows
+                    will save with NULL eur_amount until you fetch rates.</span>
+                ) : (
+                  <>
+                    {status.rates.map((r, i) => (
+                      <span key={r.currency} className="inline-block">
+                        {i > 0 && " · "}
+                        <strong>{r.currency}</strong> {Number(r.rate).toFixed(4)}{" "}
+                        <span className={r.daysOld > 7 ? "text-red-600" : "text-gray-500"}>
+                          ({r.rateDate}, {r.daysOld}d old)
+                        </span>
+                      </span>
+                    ))}
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => handleEcb(false)}
+                  disabled={anyBusy}
+                  className="px-2.5 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {fetchingEcb ? "Fetching…" : "Fetch ECB now"}
+                </button>
+                <button
+                  onClick={() => handleEcb(true)}
+                  disabled={anyBusy}
+                  title="Overwrite today's rate even if one is already stored"
+                  className="px-2.5 py-1 border border-gray-300 text-gray-700 rounded text-xs hover:bg-white disabled:opacity-50"
+                >
+                  Force
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons. */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={handleRegenerateCharges}
+                disabled={anyBusy}
+                className="px-3 py-1.5 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700 disabled:opacity-50"
+                title="Creates monthly charge rows for every active student, covering the last 3 academic years. Safe to run repeatedly."
+              >
+                {regenerating ? "Regenerating…" : "Regenerate charges for all students"}
+              </button>
+              <button
+                onClick={handleRebuild}
+                disabled={anyBusy || !anyMissing}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                title="Computes and persists eur_amount for every payment/charge row that's still NULL."
+              >
+                {rebuilding ? "Rebuilding…" : anyMissing ? "Rebuild EUR snapshots" : "Snapshots complete"}
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500">
+              Recommended order: <strong>Fetch ECB</strong> →{" "}
+              <strong>Regenerate charges</strong> → <strong>Rebuild EUR snapshots</strong>.
+            </p>
+          </div>
+
+          {progress && (
+            <div className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded p-2 font-mono">
+              {progress}
+            </div>
+          )}
+
+          {err && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+              {err}
+            </div>
+          )}
         </div>
       )}
     </div>
