@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS charges (
   eur_amount NUMERIC(12, 2),
   eur_rate NUMERIC(14, 6),
   eur_rate_date DATE,
+  -- How the rate was picked: 'historical' | 'fallback' | 'manual' (005_eur_rate_kind.sql).
+  eur_rate_kind VARCHAR(16)
+    CHECK (eur_rate_kind IS NULL OR eur_rate_kind IN ('historical', 'fallback', 'manual')),
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -121,6 +124,9 @@ CREATE TABLE IF NOT EXISTS payments (
   eur_amount NUMERIC(12, 2),
   eur_rate NUMERIC(14, 6),
   eur_rate_date DATE,
+  -- How the rate was picked: 'historical' | 'fallback' | 'manual' (005_eur_rate_kind.sql).
+  eur_rate_kind VARCHAR(16)
+    CHECK (eur_rate_kind IS NULL OR eur_rate_kind IN ('historical', 'fallback', 'manual')),
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

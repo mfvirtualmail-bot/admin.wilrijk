@@ -65,6 +65,7 @@ export async function PUT(req: NextRequest) {
         eur_amount: eur.eur_amount,
         eur_rate: eur.eur_rate,
         eur_rate_date: eur.eur_rate_date,
+        eur_rate_kind: eur.eur_rate_kind,
         updated_at: new Date().toISOString(),
       })
       .eq("id", paymentId)
@@ -91,6 +92,7 @@ export async function PUT(req: NextRequest) {
         eur_amount: eur.eur_amount,
         eur_rate: eur.eur_rate,
         eur_rate_date: eur.eur_rate_date,
+        eur_rate_kind: eur.eur_rate_kind,
       })
       .select()
       .single();

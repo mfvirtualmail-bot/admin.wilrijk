@@ -26,8 +26,8 @@ export async function GET() {
   const db = createServerClient();
   const [famRes, chargesRes, paymentsRes] = await Promise.all([
     db.from("families").select("*").order("name"),
-    db.from("charges").select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date"),
-    db.from("payments").select("id, family_id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date"),
+    db.from("charges").select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
+    db.from("payments").select("id, family_id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
   ]);
   if (famRes.error) return NextResponse.json({ error: famRes.error.message }, { status: 500 });
 

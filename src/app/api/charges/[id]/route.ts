@@ -41,6 +41,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       update.eur_amount = eur.eur_amount;
       update.eur_rate = eur.eur_rate;
       update.eur_rate_date = eur.eur_rate_date;
+      update.eur_rate_kind = eur.eur_rate_kind;
     }
   }
 

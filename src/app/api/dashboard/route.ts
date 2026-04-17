@@ -22,14 +22,22 @@ export async function GET() {
   const [familiesRes, childrenRes, paymentsRes, tuitionRes, chargesRes, recentPaymentsRes] = await Promise.all([
     db.from("families").select("id", { count: "exact" }).eq("is_active", true),
     db.from("children").select("id", { count: "exact" }).eq("is_active", true),
-    db.from("payments").select("id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date"),
+    db.from("payments").select("id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
     db.from("children").select("monthly_tuition, currency").eq("is_active", true),
-    db.from("charges").select("id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date"),
+    db.from("charges").select("id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
     db.from("payments")
       .select("id, amount, payment_date, payment_method, currency, families(name, father_name)")
       .order("payment_date", { ascending: false })
       .limit(5),
   ]);
+
+  // Bubble DB errors instead of silently coalescing to [] — the latter
+  // pattern hides missing-column / schema-drift problems as "€0 received".
+  if (paymentsRes.error || chargesRes.error) {
+    const msg = paymentsRes.error?.message ?? chargesRes.error?.message ?? "DB error";
+    console.error("[dashboard] supabase error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 
   // Self-heal any rows whose EUR snapshot was never written (legacy rows
   // created before migration 004_eur_snapshot). After this call, every
