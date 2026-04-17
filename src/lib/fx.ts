@@ -418,24 +418,109 @@ export async function ensureChargeEurAmounts(
 }
 
 /** Load rate tables for each requested currency. Bootstraps from ECB if
- *  any non-EUR currency has zero rows. */
-async function loadTablesForCurrencies(
+ *  any non-EUR currency has zero rows OR its latest rate is older than
+ *  a week. Exported so hot paths can load rate tables once and feed the
+ *  in-memory snapshot helpers (no per-row DB call). */
+export async function loadTablesForCurrencies(
   db: SupabaseClient,
   currencies: Set<Currency>,
 ): Promise<Map<Currency, CurrencyRateTable>> {
   const tables = new Map<Currency, CurrencyRateTable>();
-  let bootstrapped = false;
+  let needEcb = false;
   for (const c of Array.from(currencies)) {
     if (c === "EUR") continue;
-    let t = await loadRateTable(db, c);
-    if (t.rows.length === 0 && !bootstrapped) {
-      bootstrapped = true;
-      try { await fetchEcbDailyRates(); } catch { /* ignore */ }
-      t = await loadRateTable(db, c);
-    }
+    const t = await loadRateTable(db, c);
     tables.set(c, t);
+    if (t.rows.length === 0) needEcb = true;
+    else if (t.latest) {
+      const daysOld = (Date.now() - new Date(t.latest.date).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysOld > 7) needEcb = true;
+    }
+  }
+  if (needEcb) {
+    try {
+      await ensureEcbRefreshed();
+      for (const c of Array.from(currencies)) {
+        if (c === "EUR") continue;
+        tables.set(c, await loadRateTable(db, c));
+      }
+    } catch { /* swallow — callers handle null rates */ }
   }
   return tables;
+}
+
+/** Module-level promise cache so concurrent hot-path requests don't
+ *  each fire their own ECB fetch. Resolves at most once per day. */
+let ecbRefreshPromise: Promise<unknown> | null = null;
+let ecbRefreshDate: string | null = null;
+
+export async function ensureEcbRefreshed(): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  if (ecbRefreshDate === today && ecbRefreshPromise) {
+    await ecbRefreshPromise;
+    return;
+  }
+  ecbRefreshDate = today;
+  ecbRefreshPromise = fetchEcbDailyRates().catch((e) => {
+    // Reset so a later request can retry.
+    ecbRefreshPromise = null;
+    ecbRefreshDate = null;
+    throw e;
+  });
+  await ecbRefreshPromise;
+}
+
+/**
+ * Compute `eur_amount` for any rows that are missing it, IN MEMORY ONLY.
+ * Does NOT write back to the DB. Use this on hot paths (dashboard,
+ * reports, spreadsheet, families) so a page render is O(queries) not
+ * O(rows). Rows are mutated in place.
+ *
+ * For durable writes, call `ensurePaymentEurAmounts` /
+ * `ensureChargeEurAmounts` (what `/api/fx/rebuild-snapshots` uses).
+ */
+export function fillMissingEurInMemory(
+  rows: PaymentEurRow[] | ChargeEurRow[],
+  tables: Map<Currency, CurrencyRateTable>,
+  getDate: (row: PaymentEurRow | ChargeEurRow) => string,
+): void {
+  for (const r of rows) {
+    if (r.eur_amount != null) continue;
+    const cur: Currency = (normalizeCurrency(r.currency) ?? "EUR") as Currency;
+    const date = getDate(r);
+    const snap = snapshotFromTable(tables, cur, Number(r.amount), date);
+    r.eur_amount = snap.eur_amount;
+    r.eur_rate = snap.eur_rate;
+    r.eur_rate_date = snap.eur_rate_date;
+    r.eur_rate_kind = snap.eur_rate_kind;
+  }
+}
+
+/** Fill payment eur_amount in memory. `payment_date` is the FX date. */
+export function fillPaymentEurInMemory(
+  rows: PaymentEurRow[],
+  tables: Map<Currency, CurrencyRateTable>,
+): void {
+  fillMissingEurInMemory(rows, tables, (r) => String((r as PaymentEurRow).payment_date).slice(0, 10));
+}
+
+/** Fill charge eur_amount in memory. Uses the first day of the charge's month. */
+export function fillChargeEurInMemory(
+  rows: ChargeEurRow[],
+  tables: Map<Currency, CurrencyRateTable>,
+): void {
+  fillMissingEurInMemory(rows, tables, (r) => {
+    const c = r as ChargeEurRow;
+    return `${c.year}-${String(c.month).padStart(2, "0")}-01`;
+  });
+}
+
+/** Accept 'usd' / 'Usd' / ' USD ' / etc. — reject blanks and unsupported. */
+function normalizeCurrency(c: Currency | string | null | undefined): Currency | null {
+  if (c == null) return null;
+  const s = String(c).trim().toUpperCase();
+  if (s === "EUR" || s === "USD" || s === "GBP") return s as Currency;
+  return null;
 }
 
 /** Compute snapshot fields from a pre-loaded rate table (no DB calls). */

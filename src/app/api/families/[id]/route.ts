@@ -3,11 +3,13 @@ import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import {
-  ensurePaymentEurAmounts,
-  ensureChargeEurAmounts,
+  loadTablesForCurrencies,
+  fillPaymentEurInMemory,
+  fillChargeEurInMemory,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -44,8 +46,19 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const pastCharges = charges.filter(
     (c) => Number(c.year) * 12 + Number(c.month) <= currentKey,
   );
-  await ensureChargeEurAmounts(db, pastCharges);
-  await ensurePaymentEurAmounts(db, payments);
+
+  const currencies = new Set<Currency>();
+  for (const r of payments) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  for (const r of pastCharges) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  const tables = await loadTablesForCurrencies(db, currencies);
+  fillChargeEurInMemory(pastCharges, tables);
+  fillPaymentEurInMemory(payments, tables);
 
   const totalCharged = pastCharges.reduce((s, c) => s + Number(c.eur_amount ?? 0), 0);
   const totalPaid = payments.reduce((s, p) => s + Number(p.eur_amount ?? 0), 0);

@@ -3,11 +3,13 @@ import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import {
-  ensurePaymentEurAmounts,
-  ensureChargeEurAmounts,
+  loadTablesForCurrencies,
+  fillPaymentEurInMemory,
+  fillChargeEurInMemory,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -38,10 +40,20 @@ export async function GET() {
 
   const chargeRows = ((chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>)
     .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey);
-  await ensureChargeEurAmounts(db, chargeRows);
-
   const paymentRows = (paymentsRes.data ?? []) as Array<PaymentEurRow & { family_id: string }>;
-  await ensurePaymentEurAmounts(db, paymentRows);
+
+  const currencies = new Set<Currency>();
+  for (const r of paymentRows) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  for (const r of chargeRows) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  const tables = await loadTablesForCurrencies(db, currencies);
+  fillChargeEurInMemory(chargeRows, tables);
+  fillPaymentEurInMemory(paymentRows, tables);
 
   const byFam = new Map<string, { charged: number; paid: number }>();
   for (const c of chargeRows) {
