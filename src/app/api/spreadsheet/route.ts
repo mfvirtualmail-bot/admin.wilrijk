@@ -4,9 +4,9 @@ import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import {
-  getRate,
-  ensurePaymentEurAmounts,
-  ensureChargeEurAmounts,
+  loadTablesForCurrencies,
+  fillPaymentEurInMemory,
+  fillChargeEurInMemory,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
@@ -33,21 +33,6 @@ const ACADEMIC_MONTHS = [
 
 function monthYear(baseYear: number, month: number) {
   return { month, year: month >= 9 ? baseYear : baseYear + 1 };
-}
-
-// Today's rate map (amount of currency per 1 EUR), so summary columns can
-// be expressed in each family's base currency. For non-EUR base currencies
-// we go EUR -> base by multiplying by the base's rate; for EUR base we
-// just sum eur_amount directly.
-async function todaysRates() {
-  const today = new Date().toISOString().slice(0, 10);
-  const rates = new Map<Currency, number>();
-  rates.set("EUR", 1);
-  for (const c of ["USD", "GBP"] as Currency[]) {
-    const r = await getRate(today, c);
-    if (r) rates.set(c, r.rate);
-  }
-  return rates;
 }
 
 function eurToBase(eurAmount: number, base: Currency, rates: Map<Currency, number>): number {
@@ -95,11 +80,34 @@ export async function GET() {
   }>;
   const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
 
-  // Self-heal any rows whose snapshot was never written.
-  await ensurePaymentEurAmounts(db, payments);
-  await ensureChargeEurAmounts(db, charges);
+  // Build the per-currency rate table once, fill missing eur_amount in
+  // memory (no DB writes — that caused the timeout). Persistent backfill
+  // lives behind /api/fx/rebuild-snapshots.
+  const currencies = new Set<Currency>();
+  for (const r of payments) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  for (const r of charges) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  for (const c of children) {
+    const cur = (c.currency ?? "EUR") as Currency;
+    if (cur === "EUR" || cur === "USD" || cur === "GBP") currencies.add(cur);
+  }
+  const tables = await loadTablesForCurrencies(db, currencies);
+  fillPaymentEurInMemory(payments, tables);
+  fillChargeEurInMemory(charges, tables);
 
-  const rates = await todaysRates();
+  // "Today's rate" per currency — prefer the actual latest rate in the
+  // table we already loaded (falls back to 1 for EUR).
+  const rates = new Map<Currency, number>();
+  rates.set("EUR", 1);
+  for (const c of ["USD", "GBP"] as Currency[]) {
+    const latest = tables.get(c)?.latest;
+    if (latest) rates.set(c, Number(latest.rate));
+  }
 
   // Base currency per family: first non-EUR child tuition currency we
   // see, else EUR. Matches "if tuition is in GBP, totals stay in GBP".

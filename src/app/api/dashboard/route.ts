@@ -3,9 +3,9 @@ import { validateSession } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import {
-  ensurePaymentEurAmounts,
-  ensureChargeEurAmounts,
-  snapshotEurFields,
+  loadTablesForCurrencies,
+  fillPaymentEurInMemory,
+  fillChargeEurInMemory,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
@@ -39,31 +39,55 @@ export async function GET() {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  // Self-heal any rows whose EUR snapshot was never written (legacy rows
-  // created before migration 004_eur_snapshot). After this call, every
-  // row's `eur_amount` is populated both in memory and in the database.
   const paymentRows = (paymentsRes.data ?? []) as PaymentEurRow[];
-  await ensurePaymentEurAmounts(db, paymentRows);
-  const totalPaid = paymentRows.reduce((s, p) => s + Number(p.eur_amount ?? 0), 0);
+  const tuitionRows = (tuitionRes.data ?? []) as Array<{ monthly_tuition: number; currency: Currency | null }>;
 
   // Only count charges for months that have already started.
   const now = new Date();
   const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
   const chargeRows = ((chargesRes.data ?? []) as ChargeEurRow[])
     .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey);
-  await ensureChargeEurAmounts(db, chargeRows);
+
+  // Load rate tables ONCE for every currency that appears in the data,
+  // then fill `eur_amount` in memory for rows that don't have it. No
+  // per-row DB writes — that was the self-heal timeout. The dedicated
+  // /api/fx/rebuild-snapshots endpoint does the durable write-back.
+  const currencies = new Set<Currency>();
+  for (const r of paymentRows) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  for (const r of chargeRows) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  for (const t of tuitionRows) {
+    const c = (t.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  const tables = await loadTablesForCurrencies(db, currencies);
+
+  fillPaymentEurInMemory(paymentRows, tables);
+  fillChargeEurInMemory(chargeRows, tables);
+
+  const totalPaid = paymentRows.reduce((s, p) => s + Number(p.eur_amount ?? 0), 0);
   const totalCharged = chargeRows.reduce((s, c) => s + Number(c.eur_amount ?? 0), 0);
   const totalDue = Math.max(0, totalCharged - totalPaid);
 
-  // Monthly expected: tuition rows aren't billed yet (no charge row of
-  // their own), so there's nothing to snapshot in the DB. We just
-  // convert each child's monthly tuition at today's rate for the stat.
-  const tuitionRows = (tuitionRes.data ?? []) as Array<{ monthly_tuition: number; currency: Currency | null }>;
-  const today = new Date().toISOString().slice(0, 10);
+  // Monthly expected: children's monthly tuition converted at the latest
+  // rate we have for each non-EUR currency. (Tuition isn't a charge row,
+  // so there's nothing to snapshot.)
   let monthlyExpected = 0;
   for (const t of tuitionRows) {
-    const eur = await snapshotEurFields(Number(t.monthly_tuition), (t.currency ?? "EUR") as Currency, today);
-    if (eur.eur_amount != null) monthlyExpected += eur.eur_amount;
+    const cur = (t.currency ?? "EUR") as Currency;
+    const amount = Number(t.monthly_tuition);
+    if (cur === "EUR") {
+      monthlyExpected += amount;
+    } else {
+      const table = tables.get(cur);
+      const latest = table?.latest;
+      if (latest) monthlyExpected += amount / Number(latest.rate);
+    }
   }
 
   // Per-currency summary for the UI "breakdown" expander.

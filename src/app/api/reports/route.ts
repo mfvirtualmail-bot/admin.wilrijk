@@ -4,8 +4,9 @@ import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import {
-  ensurePaymentEurAmounts,
-  ensureChargeEurAmounts,
+  loadTablesForCurrencies,
+  fillPaymentEurInMemory,
+  fillChargeEurInMemory,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
@@ -58,8 +59,19 @@ export async function GET() {
   }>;
   const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
 
-  await ensurePaymentEurAmounts(db, payments);
-  await ensureChargeEurAmounts(db, charges);
+  // In-memory EUR fill (no DB writes on hot path).
+  const currencies = new Set<Currency>();
+  for (const r of payments) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  for (const r of charges) {
+    const c = (r.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
+  }
+  const tables = await loadTablesForCurrencies(db, currencies);
+  fillPaymentEurInMemory(payments, tables);
+  fillChargeEurInMemory(charges, tables);
 
   const paymentEurById = new Map<string, number>();
   for (const p of payments) paymentEurById.set(p.id, Number(p.eur_amount ?? 0));
