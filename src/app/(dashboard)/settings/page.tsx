@@ -684,6 +684,8 @@ interface FxStatus {
   missingCharges: number;
   totalPayments: number;
   totalCharges: number;
+  fallbackPayments: number;
+  fallbackCharges: number;
 }
 
 function SnapshotStatusPanel() {
@@ -692,6 +694,8 @@ function SnapshotStatusPanel() {
   const [rebuilding, setRebuilding] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [fetchingEcb, setFetchingEcb] = useState(false);
+  const [fetchingHistory, setFetchingHistory] = useState(false);
+  const [resnapshotting, setResnapshotting] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -735,6 +739,83 @@ function SnapshotStatusPanel() {
       setErr((e as Error).message);
     } finally {
       setFetchingEcb(false);
+      load();
+    }
+  }
+
+  // --- 1b. Fetch the full ECB history (back to 1999). Use this when
+  //         existing rows are stamped with kind='fallback' because they
+  //         only had today's rate to use — once history is loaded, run
+  //         "Re-snapshot fallback rows" below.
+  async function handleFetchHistory() {
+    if (!confirm(
+      "Fetch the full ECB history (back to 1999)? This can upsert thousands " +
+      "of rate rows; it's usually fast but can take ~10-30s depending on ECB.",
+    )) return;
+    setFetchingHistory(true);
+    setErr(null);
+    setProgress("Fetching ECB history…");
+    try {
+      const res = await fetch("/api/fx/fetch-history", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "History fetch failed");
+      const parts = [
+        `ECB history: ${d.rowsUpserted} rows upserted`,
+      ];
+      if (d.earliestDate && d.latestDate) {
+        parts.push(`covering ${d.earliestDate} → ${d.latestDate}`);
+      }
+      const byCur = d.byCurrency as Record<string, number>;
+      if (byCur) parts.push(Object.entries(byCur).map(([c, n]) => `${c}: ${n}`).join(", "));
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setFetchingHistory(false);
+      load();
+    }
+  }
+
+  // --- 1c. Re-snapshot every payment/charge whose current kind is
+  //         'fallback' (i.e. their EUR conversion used a later rate
+  //         because no historical one existed). Safe: 'manual' rows are
+  //         never touched.
+  async function handleResnapshotFallback() {
+    if (!confirm(
+      "Re-snapshot every row whose FX rate came from a 'fallback' (a rate from a different date)? " +
+      "This clears their EUR snapshot and re-runs the snapshot using the (now populated) historical rates. " +
+      "Manual overrides are preserved.",
+    )) return;
+    setResnapshotting(true);
+    setErr(null);
+    setProgress("Re-snapshotting fallback rows…");
+    let totalPayments = 0;
+    let totalCharges = 0;
+    try {
+      // First call includes fallback=1 (which NULLs out fallback rows,
+      // then processes). Subsequent calls just continue the work; no
+      // need to include=fallback again because they're already NULL.
+      for (let i = 0; i < 40; i++) {
+        const include = i === 0 ? "&include=fallback" : "";
+        const res = await fetch(`/api/fx/rebuild-snapshots?limit=500${include}`, { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error ?? "Re-snapshot failed");
+        totalPayments += d.updatedPayments ?? 0;
+        totalCharges += d.updatedCharges ?? 0;
+        const remaining = (d.remainingPayments ?? 0) + (d.remainingCharges ?? 0);
+        setProgress(
+          `Pass ${i + 1}: wrote ${d.updatedPayments} payment(s) + ${d.updatedCharges} charge(s); ${remaining} row(s) pending`,
+        );
+        if (remaining === 0) break;
+        if ((d.updatedPayments ?? 0) + (d.updatedCharges ?? 0) === 0) {
+          throw new Error(`Stopped — ${remaining} row(s) still have no usable rate. Fetch ECB history or add a manual rate.`);
+        }
+      }
+      setProgress(`Done. Re-snapshotted ${totalPayments} payment(s) + ${totalCharges} charge(s) using historical rates.`);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setResnapshotting(false);
       load();
     }
   }
@@ -814,9 +895,10 @@ function SnapshotStatusPanel() {
   }
 
   const anyMissing = status && (status.missingPayments > 0 || status.missingCharges > 0);
+  const anyFallback = status && (status.fallbackPayments > 0 || status.fallbackCharges > 0);
   const ratesStale = status?.rates.some((r) => r.daysOld > 7) ?? false;
   const noRates = (status?.rates.length ?? 0) === 0;
-  const anyBusy = rebuilding || regenerating || fetchingEcb;
+  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting;
 
   return (
     <div className="border border-gray-200 rounded-md p-4 bg-white">
@@ -894,13 +976,21 @@ function SnapshotStatusPanel() {
                   </>
                 )}
               </div>
-              <div className="flex gap-2 shrink-0">
+              <div className="flex gap-2 shrink-0 flex-wrap justify-end">
                 <button
                   onClick={() => handleEcb(false)}
                   disabled={anyBusy}
                   className="px-2.5 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {fetchingEcb ? "Fetching…" : "Fetch ECB now"}
+                  {fetchingEcb ? "Fetching…" : "Fetch today"}
+                </button>
+                <button
+                  onClick={handleFetchHistory}
+                  disabled={anyBusy}
+                  title="Pulls the full ECB history (back to 1999) so historical payments snapshot at the correct rate"
+                  className="px-2.5 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {fetchingHistory ? "Fetching…" : "Fetch full history"}
                 </button>
                 <button
                   onClick={() => handleEcb(true)}
@@ -908,7 +998,7 @@ function SnapshotStatusPanel() {
                   title="Overwrite today's rate even if one is already stored"
                   className="px-2.5 py-1 border border-gray-300 text-gray-700 rounded text-xs hover:bg-white disabled:opacity-50"
                 >
-                  Force
+                  Force today
                 </button>
               </div>
             </div>
@@ -933,10 +1023,24 @@ function SnapshotStatusPanel() {
               >
                 {rebuilding ? "Rebuilding…" : anyMissing ? "Rebuild EUR snapshots" : "Snapshots complete"}
               </button>
+              <button
+                onClick={handleResnapshotFallback}
+                disabled={anyBusy || !anyFallback}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                title="Clears eur_amount on rows with kind='fallback' and re-runs snapshot using historical rates. Manual overrides preserved."
+              >
+                {resnapshotting
+                  ? "Re-snapshotting…"
+                  : anyFallback
+                    ? `Re-snapshot ${(status?.fallbackPayments ?? 0) + (status?.fallbackCharges ?? 0)} fallback row(s)`
+                    : "No fallback rows"}
+              </button>
             </div>
             <p className="text-[11px] text-gray-500">
-              Recommended order: <strong>Fetch ECB</strong> →{" "}
-              <strong>Regenerate charges</strong> → <strong>Rebuild EUR snapshots</strong>.
+              Recommended order: <strong>Fetch full history</strong> →{" "}
+              <strong>Regenerate charges</strong> → <strong>Rebuild EUR snapshots</strong> →{" "}
+              <strong>Re-snapshot fallback rows</strong> (only needed once after first
+              populating historical ECB rates).
             </p>
           </div>
 

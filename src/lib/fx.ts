@@ -699,3 +699,92 @@ export async function fetchEcbDailyRates(opts: { force?: boolean } = {}): Promis
 
   return { date, inserted, skipped };
 }
+
+/**
+ * Fetch the ECB **full-history** daily rates XML (back to 1999) and
+ * upsert every USD/GBP row. This is what you call when the DB only has
+ * today's rate but you need to backfill months or years of payments
+ * with the correct historical rate.
+ *
+ * Unlike `fetchEcbDailyRates`, this one upserts unconditionally (no
+ * pre-check per day) because the XML is ~5MB and re-reading to see
+ * what already exists row-by-row would be wasteful. The upsert's
+ * `(date, currency)` unique constraint silently no-ops duplicates at
+ * the database level.
+ *
+ * Returns a count of rows inserted or updated, plus the earliest /
+ * latest date seen so the caller can show a summary.
+ */
+export async function fetchEcbHistoricalRates(): Promise<{
+  rowsUpserted: number;
+  earliestDate: string | null;
+  latestDate: string | null;
+  byCurrency: Record<string, number>;
+}> {
+  const res = await fetch(
+    "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.xml",
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`ECB history fetch failed: HTTP ${res.status}`);
+  const xml = await res.text();
+
+  // The file is nested: an outer <Cube> wraps a series of <Cube time='...'>
+  // day blocks, each containing <Cube currency='X' rate='Y' />. We parse
+  // it with a regex walk over day blocks; XML parsing libs would work
+  // too but this avoids pulling in a dep for one feed.
+  const dayBlockRe = /<Cube\s+time\s*=\s*["'](\d{4}-\d{2}-\d{2})["']\s*>([\s\S]*?)<\/Cube>/g;
+  const rateRe = /<Cube\s+currency\s*=\s*["']([A-Z]{3})["']\s+rate\s*=\s*["']([\d.]+)["']\s*\/?>/g;
+
+  const SUPPORTED = new Set<string>(["USD", "GBP"]);
+  type Row = { date: string; currency: string; rate: number; source: FxSource };
+  const rows: Row[] = [];
+  let earliest: string | null = null;
+  let latest: string | null = null;
+
+  let dayMatch: RegExpExecArray | null;
+  while ((dayMatch = dayBlockRe.exec(xml)) !== null) {
+    const date = dayMatch[1];
+    const dayBody = dayMatch[2];
+    if (!earliest || date < earliest) earliest = date;
+    if (!latest || date > latest) latest = date;
+
+    // Reset lastIndex so each day's body is scanned fresh.
+    rateRe.lastIndex = 0;
+    let rateMatch: RegExpExecArray | null;
+    while ((rateMatch = rateRe.exec(dayBody)) !== null) {
+      const currency = rateMatch[1];
+      if (!SUPPORTED.has(currency)) continue;
+      const rate = parseFloat(rateMatch[2]);
+      if (!isFinite(rate) || rate <= 0) continue;
+      rows.push({ date, currency, rate, source: "ecb" });
+    }
+  }
+
+  if (rows.length === 0) {
+    return { rowsUpserted: 0, earliestDate: null, latestDate: null, byCurrency: {} };
+  }
+
+  // Upsert in reasonable chunks — a single upsert of thousands of rows
+  // is fine for Postgres but `fetch`-based Supabase payloads can get
+  // unwieldy. 500 per call is a safe middle ground.
+  const db = createServerClient();
+  let upserted = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await db
+      .from("exchange_rates")
+      .upsert(chunk, { onConflict: "date,currency" });
+    if (error) throw new Error(`ECB history upsert failed: ${error.message}`);
+    upserted += chunk.length;
+  }
+
+  const byCurrency: Record<string, number> = {};
+  for (const r of rows) byCurrency[r.currency] = (byCurrency[r.currency] ?? 0) + 1;
+
+  return {
+    rowsUpserted: upserted,
+    earliestDate: earliest,
+    latestDate: latest,
+    byCurrency,
+  };
+}
