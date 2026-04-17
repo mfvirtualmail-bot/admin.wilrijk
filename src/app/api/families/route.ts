@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { convertManyToEur } from "@/lib/fx";
-import type { Currency } from "@/lib/types";
+import {
+  ensurePaymentEurAmounts,
+  ensureChargeEurAmounts,
+  type PaymentEurRow,
+  type ChargeEurRow,
+} from "@/lib/fx";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -22,50 +26,31 @@ export async function GET() {
   const db = createServerClient();
   const [famRes, chargesRes, paymentsRes] = await Promise.all([
     db.from("families").select("*").order("name"),
-    db.from("charges").select("id, family_id, amount, currency, month, year"),
-    db.from("payments").select("id, family_id, amount, currency, payment_date"),
+    db.from("charges").select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date"),
+    db.from("payments").select("id, family_id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date"),
   ]);
   if (famRes.error) return NextResponse.json({ error: famRes.error.message }, { status: 500 });
 
-  // Compute per-family balance in EUR using the same FX conversion logic
-  // as the dashboard (charges counted only if their month has started).
+  // Compute per-family balance in EUR from the snapshot column. Charges
+  // count only if their month has started.
   const now = new Date();
   const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
 
-  const chargeRecords = (chargesRes.data ?? [])
-    .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey)
-    .map((c) => ({
-      id: `c:${c.id}`,
-      familyId: c.family_id as string,
-      amount: Number(c.amount),
-      currency: ((c.currency as Currency) ?? "EUR") as Currency,
-      date: `${c.year}-${String(c.month).padStart(2, "0")}-01`,
-    }));
-  const paymentRecords = (paymentsRes.data ?? []).map((p) => ({
-    id: `p:${p.id}`,
-    familyId: p.family_id as string,
-    amount: Number(p.amount),
-    currency: ((p.currency as Currency) ?? "EUR") as Currency,
-    date: String(p.payment_date).slice(0, 10),
-  }));
+  const chargeRows = ((chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>)
+    .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey);
+  await ensureChargeEurAmounts(db, chargeRows);
 
-  const chargeConv = await convertManyToEur(
-    chargeRecords.map(({ id, amount, currency, date }) => ({ id, amount, currency, date })),
-  );
-  const paymentConv = await convertManyToEur(
-    paymentRecords.map(({ id, amount, currency, date }) => ({ id, amount, currency, date })),
-  );
+  const paymentRows = (paymentsRes.data ?? []) as Array<PaymentEurRow & { family_id: string }>;
+  await ensurePaymentEurAmounts(db, paymentRows);
 
   const byFam = new Map<string, { charged: number; paid: number }>();
-  for (let i = 0; i < chargeRecords.length; i++) {
-    const fam = chargeRecords[i].familyId;
-    if (!byFam.has(fam)) byFam.set(fam, { charged: 0, paid: 0 });
-    byFam.get(fam)!.charged += chargeConv.breakdown[i]?.eur ?? 0;
+  for (const c of chargeRows) {
+    if (!byFam.has(c.family_id)) byFam.set(c.family_id, { charged: 0, paid: 0 });
+    byFam.get(c.family_id)!.charged += Number(c.eur_amount ?? 0);
   }
-  for (let i = 0; i < paymentRecords.length; i++) {
-    const fam = paymentRecords[i].familyId;
-    if (!byFam.has(fam)) byFam.set(fam, { charged: 0, paid: 0 });
-    byFam.get(fam)!.paid += paymentConv.breakdown[i]?.eur ?? 0;
+  for (const p of paymentRows) {
+    if (!byFam.has(p.family_id)) byFam.set(p.family_id, { charged: 0, paid: 0 });
+    byFam.get(p.family_id)!.paid += Number(p.eur_amount ?? 0);
   }
 
   const families = (famRes.data ?? []).map((f) => {

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { snapshotEurFields } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -108,9 +110,17 @@ export async function POST(req: NextRequest) {
 
   let imported = 0;
   if (validPayments.length > 0) {
+    // Snapshot the EUR equivalent on each row up-front so imported
+    // payments don't need any post-hoc backfill.
+    const withEur = await Promise.all(
+      validPayments.map(async (p) => {
+        const eur = await snapshotEurFields(Number(p.amount), (p.currency as Currency) ?? "EUR", p.payment_date);
+        return { ...p, eur_amount: eur.eur_amount, eur_rate: eur.eur_rate, eur_rate_date: eur.eur_rate_date };
+      }),
+    );
     const { error, data } = await db
       .from("payments")
-      .insert(validPayments)
+      .insert(withEur)
       .select("id");
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@/lib/supabase";
 import type { Currency, FxSource } from "@/lib/types";
 
@@ -166,6 +167,186 @@ export async function convertToEur(
     originalCurrency: currency,
     date,
   };
+}
+
+/**
+ * Resolve a rate for snapshotting an EUR equivalent on write. Tries the
+ * historical rate first (latest rate ON OR BEFORE `date`); if no such
+ * rate exists, falls back to the most recent rate available, even if
+ * its date is *after* `date`.
+ *
+ * This is intentionally more lenient than `getRate`: snapshots run once
+ * per record at write time and the result is persisted, so it's better
+ * to record an approximate-but-defensible rate than to leave the row
+ * with no EUR value (which would let it disappear from totals later).
+ *
+ * EUR resolves to rate=1 just like elsewhere.
+ */
+export async function getRateForSnapshot(
+  date: string,
+  currency: Currency,
+): Promise<RateLookup | null> {
+  if (currency === "EUR") {
+    return { currency: "EUR", date, rateDate: date, rate: 1, source: "ecb" };
+  }
+  const historical = await getRate(date, currency);
+  if (historical) return historical;
+  // No historical rate. Use the most recent rate of any date.
+  const db = createServerClient();
+  const { data, error } = await db
+    .from("exchange_rates")
+    .select("date, rate, source")
+    .eq("currency", currency)
+    .order("date", { ascending: false })
+    .limit(1);
+  if (error || !data || data.length === 0) return null;
+  const row = data[0] as { date: string; rate: number; source: FxSource };
+  return {
+    currency,
+    date,
+    rateDate: row.date,
+    rate: Number(row.rate),
+    source: row.source,
+  };
+}
+
+/**
+ * Compute the EUR snapshot fields (`eur_amount`, `eur_rate`,
+ * `eur_rate_date`) for a payment or charge, ready to splat into an
+ * insert or update. Returns nulls only if no rate is available at all
+ * for the currency (e.g. fresh DB with empty `exchange_rates` for that
+ * currency) — callers should treat that as a configuration error.
+ */
+export async function snapshotEurFields(
+  amount: number,
+  currency: Currency,
+  date: string,
+): Promise<{ eur_amount: number | null; eur_rate: number | null; eur_rate_date: string | null }> {
+  if (currency === "EUR") {
+    return {
+      eur_amount: Math.round(amount * 100) / 100,
+      eur_rate: 1,
+      eur_rate_date: date,
+    };
+  }
+  const lookup = await getRateForSnapshot(date, currency);
+  if (!lookup) {
+    return { eur_amount: null, eur_rate: null, eur_rate_date: null };
+  }
+  const eur = amount / lookup.rate;
+  return {
+    eur_amount: Math.round(eur * 100) / 100,
+    eur_rate: lookup.rate,
+    eur_rate_date: lookup.rateDate,
+  };
+}
+
+/** A row from `payments` that needs its EUR snapshot ensured. */
+export interface PaymentEurRow {
+  id: string;
+  amount: number;
+  currency: Currency | null;
+  payment_date: string;
+  eur_amount: number | null;
+  eur_rate?: number | null;
+  eur_rate_date?: string | null;
+}
+
+/** A row from `charges` that needs its EUR snapshot ensured. */
+export interface ChargeEurRow {
+  id: string;
+  amount: number;
+  currency: Currency | null;
+  month: number;
+  year: number;
+  eur_amount: number | null;
+  eur_rate?: number | null;
+  eur_rate_date?: string | null;
+}
+
+/**
+ * Self-heal: any row whose `eur_amount` is NULL gets a snapshot computed
+ * now (using the historical rate for its date, with most-recent fallback)
+ * and persisted back. Mutates each row in place so callers can sum
+ * `eur_amount` afterwards without checking for nulls.
+ *
+ * This makes legacy rows (created before 004_eur_snapshot.sql) self-fill
+ * on the first dashboard load after deploy. After that load, totals are
+ * cheap straight sums.
+ */
+export async function ensurePaymentEurAmounts(
+  db: SupabaseClient,
+  rows: PaymentEurRow[],
+): Promise<void> {
+  const missing = rows.filter((r) => r.eur_amount == null);
+  if (missing.length === 0) return;
+  for (const r of missing) {
+    const cur: Currency = (r.currency ?? "EUR") as Currency;
+    const date = String(r.payment_date).slice(0, 10);
+    const eur = await snapshotEurFields(Number(r.amount), cur, date);
+    if (eur.eur_amount != null) {
+      await db.from("payments").update({
+        eur_amount: eur.eur_amount,
+        eur_rate: eur.eur_rate,
+        eur_rate_date: eur.eur_rate_date,
+      }).eq("id", r.id);
+      r.eur_amount = eur.eur_amount;
+      r.eur_rate = eur.eur_rate;
+      r.eur_rate_date = eur.eur_rate_date;
+    }
+  }
+}
+
+export async function ensureChargeEurAmounts(
+  db: SupabaseClient,
+  rows: ChargeEurRow[],
+): Promise<void> {
+  const missing = rows.filter((r) => r.eur_amount == null);
+  if (missing.length === 0) return;
+  for (const r of missing) {
+    const cur: Currency = (r.currency ?? "EUR") as Currency;
+    const date = `${r.year}-${String(r.month).padStart(2, "0")}-01`;
+    const eur = await snapshotEurFields(Number(r.amount), cur, date);
+    if (eur.eur_amount != null) {
+      await db.from("charges").update({
+        eur_amount: eur.eur_amount,
+        eur_rate: eur.eur_rate,
+        eur_rate_date: eur.eur_rate_date,
+      }).eq("id", r.id);
+      r.eur_amount = eur.eur_amount;
+      r.eur_rate = eur.eur_rate;
+      r.eur_rate_date = eur.eur_rate_date;
+    }
+  }
+}
+
+/**
+ * Snapshot of the most recent rate we know about for each non-EUR
+ * currency. Used for the Settings UI ("last-known fallback rate") and
+ * also the basis on which `getRateForSnapshot` falls back when no rate
+ * exists for a payment's actual date.
+ */
+export async function getLatestKnownRates(): Promise<Array<{
+  currency: Currency;
+  rate: number;
+  rateDate: string;
+  source: FxSource;
+}>> {
+  const db = createServerClient();
+  const out: Array<{ currency: Currency; rate: number; rateDate: string; source: FxSource }> = [];
+  for (const c of ["USD", "GBP"] as Currency[]) {
+    const { data } = await db
+      .from("exchange_rates")
+      .select("date, rate, source")
+      .eq("currency", c)
+      .order("date", { ascending: false })
+      .limit(1);
+    if (data && data.length > 0) {
+      const row = data[0] as { date: string; rate: number; source: FxSource };
+      out.push({ currency: c, rate: Number(row.rate), rateDate: row.date, source: row.source });
+    }
+  }
+  return out;
 }
 
 /**

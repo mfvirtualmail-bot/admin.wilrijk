@@ -92,6 +92,10 @@ CREATE TABLE IF NOT EXISTS charges (
   year SMALLINT NOT NULL,
   amount DECIMAL(10,2) NOT NULL,
   currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
+  -- EUR snapshot, set on write (see 004_eur_snapshot.sql).
+  eur_amount NUMERIC(12, 2),
+  eur_rate NUMERIC(14, 6),
+  eur_rate_date DATE,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -113,6 +117,10 @@ CREATE TABLE IF NOT EXISTS payments (
   month SMALLINT CHECK (month BETWEEN 1 AND 12),  -- which month this payment covers
   year SMALLINT,
   reference VARCHAR(200),
+  -- EUR snapshot, set on write (see 004_eur_snapshot.sql).
+  eur_amount NUMERIC(12, 2),
+  eur_rate NUMERIC(14, 6),
+  eur_rate_date DATE,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

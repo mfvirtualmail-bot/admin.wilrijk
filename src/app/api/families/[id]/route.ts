@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import {
+  ensurePaymentEurAmounts,
+  ensureChargeEurAmounts,
+  type PaymentEurRow,
+  type ChargeEurRow,
+} from "@/lib/fx";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -28,22 +34,31 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (familyRes.error || !familyRes.data)
     return NextResponse.json({ error: "Family not found" }, { status: 404 });
 
-  // Only count charges for months that have already started (enrollment is
-  // already baked into the charges table by generateChargesForChild, so no
-  // extra enrollment filter is needed here). Future months are not yet
-  // owed, so they must be excluded from "Total Charged" / "Amount Due".
+  // Only count charges for months that have already started. We sum the
+  // EUR snapshot column (self-healing for legacy rows) rather than the
+  // raw `amount` so cross-currency families produce a meaningful total.
   const now = new Date();
   const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
-  const totalCharged = (chargesRes.data ?? [])
-    .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey)
-    .reduce((s, c) => s + Number(c.amount), 0);
-  const totalPaid = (paymentsRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
+  const charges = (chargesRes.data ?? []) as ChargeEurRow[];
+  const payments = (paymentsRes.data ?? []) as PaymentEurRow[];
+  const pastCharges = charges.filter(
+    (c) => Number(c.year) * 12 + Number(c.month) <= currentKey,
+  );
+  await ensureChargeEurAmounts(db, pastCharges);
+  await ensurePaymentEurAmounts(db, payments);
+
+  const totalCharged = pastCharges.reduce((s, c) => s + Number(c.eur_amount ?? 0), 0);
+  const totalPaid = payments.reduce((s, p) => s + Number(p.eur_amount ?? 0), 0);
 
   return NextResponse.json({
     family: familyRes.data,
     children: childrenRes.data ?? [],
     payments: paymentsRes.data ?? [],
-    balance: { charged: totalCharged, paid: totalPaid, due: totalCharged - totalPaid },
+    balance: {
+      charged: Math.round(totalCharged * 100) / 100,
+      paid: Math.round(totalPaid * 100) / 100,
+      due: Math.round((totalCharged - totalPaid) * 100) / 100,
+    },
   });
 }
 

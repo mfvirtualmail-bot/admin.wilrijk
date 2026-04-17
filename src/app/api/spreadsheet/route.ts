@@ -3,7 +3,13 @@ import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
-import { getRate } from "@/lib/fx";
+import {
+  getRate,
+  ensurePaymentEurAmounts,
+  ensureChargeEurAmounts,
+  type PaymentEurRow,
+  type ChargeEurRow,
+} from "@/lib/fx";
 import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
@@ -13,7 +19,6 @@ async function getSessionUser() {
   return r?.user ?? null;
 }
 
-// Academic year: Sep (month 9) of year Y → Aug (month 8) of year Y+1
 function getAcademicYear(date = new Date()) {
   const month = date.getMonth() + 1;
   const year = date.getFullYear();
@@ -30,9 +35,10 @@ function monthYear(baseYear: number, month: number) {
   return { month, year: month >= 9 ? baseYear : baseYear + 1 };
 }
 
-// Rate = amount of `currency` per 1 EUR. Convert between any two currencies
-// via EUR as the pivot. Rates are "today's rate" per the requirement that
-// row totals are computed as-of today.
+// Today's rate map (amount of currency per 1 EUR), so summary columns can
+// be expressed in each family's base currency. For non-EUR base currencies
+// we go EUR -> base by multiplying by the base's rate; for EUR base we
+// just sum eur_amount directly.
 async function todaysRates() {
   const today = new Date().toISOString().slice(0, 10);
   const rates = new Map<Currency, number>();
@@ -44,11 +50,10 @@ async function todaysRates() {
   return rates;
 }
 
-function convertAt(amount: number, from: Currency, to: Currency, rates: Map<Currency, number>): number {
-  if (from === to) return amount;
-  const fromRate = rates.get(from) ?? 1;
-  const toRate = rates.get(to) ?? 1;
-  return (amount / fromRate) * toRate;
+function eurToBase(eurAmount: number, base: Currency, rates: Map<Currency, number>): number {
+  if (base === "EUR") return eurAmount;
+  const r = rates.get(base) ?? 1;
+  return eurAmount * r;
 }
 
 function round2(n: number) {
@@ -72,11 +77,11 @@ export async function GET() {
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
     db.from("children").select("family_id, monthly_tuition, currency").eq("is_active", true),
     db.from("payments")
-      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, notes")
+      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, notes, eur_amount, eur_rate, eur_rate_date")
       .gte("year", minYear)
       .lte("year", maxYear),
     db.from("charges")
-      .select("family_id, amount, currency, month, year")
+      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date")
       .gte("year", minYear)
       .lte("year", maxYear),
   ]);
@@ -85,19 +90,19 @@ export async function GET() {
 
   const families = familiesRes.data ?? [];
   const children = (childrenRes.data ?? []) as Array<{ family_id: string; monthly_tuition: number; currency: Currency | null }>;
-  const payments = (paymentsRes.data ?? []) as Array<{
-    id: string; family_id: string; amount: number; currency: Currency | null;
-    payment_date: string; payment_method: string; month: number | null; year: number | null; notes: string | null;
+  const payments = (paymentsRes.data ?? []) as Array<PaymentEurRow & {
+    family_id: string; payment_method: string; month: number | null; year: number | null; notes: string | null;
   }>;
-  const charges = (chargesRes.data ?? []) as Array<{
-    family_id: string; amount: number; currency: Currency | null; month: number; year: number;
-  }>;
+  const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
+
+  // Self-heal any rows whose snapshot was never written.
+  await ensurePaymentEurAmounts(db, payments);
+  await ensureChargeEurAmounts(db, charges);
 
   const rates = await todaysRates();
 
-  // Base currency per family: the first non-EUR child tuition currency
-  // we see, else EUR. Matches the rule "if tuition is in GBP, totals stay
-  // in GBP; otherwise totals are in EUR".
+  // Base currency per family: first non-EUR child tuition currency we
+  // see, else EUR. Matches "if tuition is in GBP, totals stay in GBP".
   const baseByFamily = new Map<string, Currency>();
   const childrenByFamily = new Map<string, Array<{ monthly_tuition: number; currency: Currency }>>();
   for (const c of children) {
@@ -109,28 +114,31 @@ export async function GET() {
     else if (existing === "EUR" && cur !== "EUR") baseByFamily.set(c.family_id, cur);
   }
 
-  // Monthly tuition per family, expressed in the family's base currency.
+  // Monthly tuition per family in base currency. (Children's tuition
+  // doesn't have its own snapshot row, so we convert via EUR at today's
+  // rate using a simple two-leg pivot.)
   const tuitionByFamily = new Map<string, number>();
   for (const [famId, kids] of Array.from(childrenByFamily.entries())) {
     const base = baseByFamily.get(famId) ?? "EUR";
     let sum = 0;
-    for (const k of kids) sum += convertAt(k.monthly_tuition, k.currency, base, rates);
+    for (const k of kids) {
+      const rateFrom = rates.get(k.currency) ?? 1;
+      const eur = k.monthly_tuition / rateFrom;
+      sum += eurToBase(eur, base, rates);
+    }
     tuitionByFamily.set(famId, round2(sum));
   }
 
-  // Charges per (family, month, year), already summed in the family's
-  // base currency so we don't have to re-convert later.
+  // Charges per (family, month, year) in family's base currency.
   const chargesByFamilyMonth = new Map<string, number>();
   for (const c of charges) {
-    const famId = c.family_id;
-    const base = baseByFamily.get(famId) ?? "EUR";
-    const cur: Currency = (c.currency ?? "EUR") as Currency;
-    const converted = convertAt(Number(c.amount), cur, base, rates);
-    const key = `${famId}:${c.month}:${c.year}`;
-    chargesByFamilyMonth.set(key, (chargesByFamilyMonth.get(key) ?? 0) + converted);
+    const base = baseByFamily.get(c.family_id) ?? "EUR";
+    const inBase = eurToBase(Number(c.eur_amount ?? 0), base, rates);
+    const key = `${c.family_id}:${c.month}:${c.year}`;
+    chargesByFamilyMonth.set(key, (chargesByFamilyMonth.get(key) ?? 0) + inBase);
   }
 
-  // Payments indexed by (family, month, year). Keep the most recent one.
+  // Index payments by (family, month, year). Keep latest if multiple.
   const paymentIndex = new Map<string, (typeof payments)[number]>();
   for (const p of payments) {
     if (p.month && p.year) {
@@ -164,7 +172,7 @@ export async function GET() {
 
       if (payment) {
         const paidCur: Currency = (payment.currency ?? "EUR") as Currency;
-        totalPaid += convertAt(Number(payment.amount), paidCur, base, rates);
+        totalPaid += eurToBase(Number(payment.eur_amount ?? 0), base, rates);
         monthData[monthKey] = {
           paymentId: payment.id,
           date: payment.payment_date,

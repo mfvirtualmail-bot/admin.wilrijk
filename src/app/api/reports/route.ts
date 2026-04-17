@@ -3,7 +3,12 @@ import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
-import { convertManyToEur } from "@/lib/fx";
+import {
+  ensurePaymentEurAmounts,
+  ensureChargeEurAmounts,
+  type PaymentEurRow,
+  type ChargeEurRow,
+} from "@/lib/fx";
 import type { Currency } from "@/lib/types";
 
 const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
@@ -38,44 +43,28 @@ export async function GET() {
   const [familiesRes, paymentsRes, chargesRes] = await Promise.all([
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
     db.from("payments")
-      .select("id, family_id, amount, currency, payment_date, payment_method, month, year")
+      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, eur_amount, eur_rate, eur_rate_date")
       .gte("year", minYear)
       .lte("year", maxYear),
     db.from("charges")
-      .select("id, family_id, amount, currency, month, year")
+      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date")
       .gte("year", minYear)
       .lte("year", maxYear),
   ]);
 
   const families = familiesRes.data ?? [];
-  const payments = paymentsRes.data ?? [];
-  const charges = chargesRes.data ?? [];
+  const payments = (paymentsRes.data ?? []) as Array<PaymentEurRow & {
+    family_id: string; payment_method: string; month: number | null; year: number | null;
+  }>;
+  const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
 
-  // --- Convert every payment and charge to EUR up front. We keep the
-  //     per-row EUR amount on the record itself so downstream aggregations
-  //     (monthly, per-method, per-family) can just sum the pre-converted
-  //     value without each worrying about FX.
-  const paymentConv = await convertManyToEur(
-    payments.map((p) => ({
-      id: p.id as string,
-      amount: Number(p.amount),
-      currency: ((p.currency as Currency) ?? "EUR") as Currency,
-      date: String(p.payment_date).slice(0, 10),
-    })),
-  );
+  await ensurePaymentEurAmounts(db, payments);
+  await ensureChargeEurAmounts(db, charges);
+
   const paymentEurById = new Map<string, number>();
-  for (const r of paymentConv.breakdown) paymentEurById.set(r.id as string, r.eur);
-
-  const chargeConv = await convertManyToEur(
-    charges.map((c) => ({
-      id: c.id as string,
-      amount: Number(c.amount),
-      currency: ((c.currency as Currency) ?? "EUR") as Currency,
-      date: `${c.year}-${String(c.month).padStart(2, "0")}-01`,
-    })),
-  );
+  for (const p of payments) paymentEurById.set(p.id, Number(p.eur_amount ?? 0));
   const chargeEurById = new Map<string, number>();
-  for (const r of chargeConv.breakdown) chargeEurById.set(r.id as string, r.eur);
+  for (const c of charges) chargeEurById.set(c.id, Number(c.eur_amount ?? 0));
 
   // Only count charges whose month has already started.
   const now = new Date();
@@ -155,35 +144,37 @@ export async function GET() {
     (s, c) => s + (chargeEurById.get(c.id as string) ?? 0),
     0,
   );
-  const totalPaid = paymentConv.totalEur;
+  const totalPaid = payments.reduce((s, p) => s + Number(p.eur_amount ?? 0), 0);
   const totalDue = Math.max(0, totalCharged - totalPaid);
 
-  // --- Per-currency breakdown for the UI expander. ---
-  type CurSum = { count: number; original: number; eur: number; rates: Set<string> };
-  const makeSummary = (rows: Array<{ originalCurrency: Currency; originalAmount: number; eur: number; rate: number }>) => {
+  // --- Per-currency breakdown for the UI expander. Uses the snapshot
+  // values stored on each row, so it never reports any rows as "missing"
+  // (the snapshot's most-recent-rate fallback handles that case at write
+  // time, and self-heal handles legacy rows on read).
+  type CurSum = { count: number; original: number; eur: number };
+  const makeSummary = (rows: Array<{ amount: number; currency: Currency | null; eur_amount: number | null }>) => {
     const map = new Map<Currency, CurSum>();
     for (const r of rows) {
-      const c = r.originalCurrency;
-      if (!map.has(c)) map.set(c, { count: 0, original: 0, eur: 0, rates: new Set() });
+      const c: Currency = (r.currency ?? "EUR") as Currency;
+      if (!map.has(c)) map.set(c, { count: 0, original: 0, eur: 0 });
       const s = map.get(c)!;
       s.count++;
-      s.original += r.originalAmount;
-      s.eur += r.eur;
-      if (c !== "EUR") s.rates.add(r.rate.toFixed(4));
+      s.original += Number(r.amount);
+      s.eur += Number(r.eur_amount ?? 0);
     }
     return Array.from(map.entries()).map(([currency, s]) => ({
       currency,
       count: s.count,
       original: Math.round(s.original * 100) / 100,
       eur: Math.round(s.eur * 100) / 100,
-      rates: Array.from(s.rates),
+      rates: [],
     }));
   };
   const breakdown = {
-    payments: makeSummary(paymentConv.breakdown),
-    charges: makeSummary(chargeConv.breakdown),
-    paymentsMissing: paymentConv.missing.length,
-    chargesMissing: chargeConv.missing.length,
+    payments: makeSummary(payments),
+    charges: makeSummary(charges),
+    paymentsMissing: payments.filter((p) => p.eur_amount == null).length,
+    chargesMissing: charges.filter((c) => c.eur_amount == null).length,
   };
 
   return NextResponse.json({

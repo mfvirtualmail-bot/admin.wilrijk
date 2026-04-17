@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { snapshotEurFields } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -45,10 +47,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "family_id, amount, payment_date and payment_method are required" }, { status: 400 });
 
   const db = createServerClient();
+  const cur: Currency = (currency ?? "EUR") as Currency;
+  const eur = await snapshotEurFields(Number(amount), cur, payment_date);
 
   const { data, error } = await db
     .from("payments")
-    .insert({ family_id, amount: Number(amount), payment_date, payment_method, month, year, reference, notes, currency: currency ?? "EUR" })
+    .insert({
+      family_id,
+      amount: Number(amount),
+      payment_date,
+      payment_method,
+      month,
+      year,
+      reference,
+      notes,
+      currency: cur,
+      eur_amount: eur.eur_amount,
+      eur_rate: eur.eur_rate,
+      eur_rate_date: eur.eur_rate_date,
+    })
     .select("*, families(name, father_name)")
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
