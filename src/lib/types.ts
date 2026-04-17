@@ -21,6 +21,13 @@ export type Currency = "EUR" | "USD" | "GBP";
 
 export type FxSource = "ecb" | "manual";
 
+/** How an individual payment/charge row's EUR snapshot was picked:
+ *   - 'historical'  rate's date is on or before the row's own date
+ *   - 'fallback'    the row's date had no rate; we used a later rate
+ *   - 'manual'      an operator overrode this row's rate via the Edit modal
+ * Stored on payments.eur_rate_kind / charges.eur_rate_kind (005 migration). */
+export type FxRateKind = "historical" | "fallback" | "manual";
+
 export interface ExchangeRate {
   /** ISO date, YYYY-MM-DD */
   date: string;
@@ -101,6 +108,11 @@ export interface Payment {
   year: number | null;
   reference: string | null;
   notes: string | null;
+  /** EUR snapshot (see 004_eur_snapshot.sql + 005_eur_rate_kind.sql). */
+  eur_amount: number | null;
+  eur_rate: number | null;
+  eur_rate_date: string | null;
+  eur_rate_kind: FxRateKind | null;
   created_at: string;
   updated_at: string;
 }

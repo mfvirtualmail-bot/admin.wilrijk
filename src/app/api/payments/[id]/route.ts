@@ -75,6 +75,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       allowed.eur_amount = eur.eur_amount;
       allowed.eur_rate = eur.eur_rate;
       allowed.eur_rate_date = eur.eur_rate_date;
+      allowed.eur_rate_kind = eur.eur_rate_kind;
     }
   }
 

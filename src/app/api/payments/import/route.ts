@@ -115,7 +115,13 @@ export async function POST(req: NextRequest) {
     const withEur = await Promise.all(
       validPayments.map(async (p) => {
         const eur = await snapshotEurFields(Number(p.amount), (p.currency as Currency) ?? "EUR", p.payment_date);
-        return { ...p, eur_amount: eur.eur_amount, eur_rate: eur.eur_rate, eur_rate_date: eur.eur_rate_date };
+        return {
+          ...p,
+          eur_amount: eur.eur_amount,
+          eur_rate: eur.eur_rate,
+          eur_rate_date: eur.eur_rate_date,
+          eur_rate_kind: eur.eur_rate_kind,
+        };
       }),
     );
     const { error, data } = await db

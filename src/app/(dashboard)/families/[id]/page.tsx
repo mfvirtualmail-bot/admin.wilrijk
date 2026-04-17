@@ -10,6 +10,7 @@ import { usePaymentMethods } from "@/lib/use-settings";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import { familyDisplayName } from "@/lib/family-utils";
 import type { Family, Child, Payment, PaymentMethod, Currency } from "@/lib/types";
+import FxProvenance from "@/components/FxProvenance";
 
 interface FamilyData {
   family: Family;
@@ -697,7 +698,15 @@ export default function FamilyDetailPage() {
                       {p.month && p.year ? hebrewMonthLabel(p.month, p.year) : <span className="text-gray-400 italic text-xs">Unallocated</span>}
                     </td>
                     <td className="py-2 text-gray-500 text-xs max-w-xs truncate">{p.notes ?? "—"}</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(Number(p.amount), (p.currency as Currency) ?? "EUR")}</td>
+                    <td className="py-2 text-right">
+                      <div className="font-semibold text-gray-900">{formatCurrency(Number(p.amount), (p.currency as Currency) ?? "EUR")}</div>
+                      <FxProvenance
+                        payment={p}
+                        canEdit={!!canEdit}
+                        onUpdated={() => loadFamily()}
+                        variant="inline"
+                      />
+                    </td>
                     {canEdit && (
                       <td className="py-2 text-right">
                         <div className="flex gap-2 justify-end">

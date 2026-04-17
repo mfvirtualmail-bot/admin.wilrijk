@@ -7,7 +7,8 @@ import Header from "@/components/Header";
 import { CURRENCY_OPTIONS, CURRENCY_SYMBOLS } from "@/lib/payment-utils";
 import { usePaymentMethods } from "@/lib/use-settings";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
-import type { Family, PaymentMethod, Currency } from "@/lib/types";
+import type { Family, PaymentMethod, Currency, FxRateKind } from "@/lib/types";
+import FxProvenance, { type FxSnapshotFields } from "@/components/FxProvenance";
 
 const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
@@ -35,6 +36,9 @@ export default function EditPaymentPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Snapshot fields for the FX provenance panel.
+  const [snapshot, setSnapshot] = useState<FxSnapshotFields | null>(null);
+
   // Load payment + families list in parallel
   useEffect(() => {
     Promise.all([
@@ -47,6 +51,7 @@ export default function EditPaymentPage() {
         return;
       }
       const p = pd.payment as {
+        id: string;
         family_id: string;
         amount: number;
         currency: Currency;
@@ -55,6 +60,10 @@ export default function EditPaymentPage() {
         month: number | null;
         year: number | null;
         notes: string | null;
+        eur_amount: number | null;
+        eur_rate: number | null;
+        eur_rate_date: string | null;
+        eur_rate_kind: FxRateKind | null;
       };
       setFamilyId(p.family_id);
       setAmount(String(p.amount));
@@ -69,6 +78,15 @@ export default function EditPaymentPage() {
         setAllocateMonth(false);
       }
       setNotes(p.notes ?? "");
+      setSnapshot({
+        id: p.id,
+        amount: p.amount,
+        currency: p.currency,
+        eur_amount: p.eur_amount,
+        eur_rate: p.eur_rate,
+        eur_rate_date: p.eur_rate_date,
+        eur_rate_kind: p.eur_rate_kind,
+      });
       setFamilies(fd.families ?? []);
       setLoading(false);
     }).catch(() => {
@@ -246,6 +264,19 @@ export default function EditPaymentPage() {
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
             </div>
+
+            {/* FX provenance — only shown for non-EUR payments. */}
+            {snapshot && snapshot.currency !== "EUR" && (
+              <FxProvenance
+                payment={snapshot}
+                canEdit={true}
+                variant="block"
+                onUpdated={(updated) => {
+                  const p = updated as FxSnapshotFields;
+                  setSnapshot(p);
+                }}
+              />
+            )}
 
             <div className="flex gap-3 pt-2">
               <button type="submit" disabled={saving}

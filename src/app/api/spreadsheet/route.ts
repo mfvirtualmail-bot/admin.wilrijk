@@ -77,11 +77,11 @@ export async function GET() {
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
     db.from("children").select("family_id, monthly_tuition, currency").eq("is_active", true),
     db.from("payments")
-      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, notes, eur_amount, eur_rate, eur_rate_date")
+      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, notes, eur_amount, eur_rate, eur_rate_date, eur_rate_kind")
       .gte("year", minYear)
       .lte("year", maxYear),
     db.from("charges")
-      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date")
+      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind")
       .gte("year", minYear)
       .lte("year", maxYear),
   ]);
