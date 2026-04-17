@@ -6,6 +6,7 @@ import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import {
   ensurePaymentEurAmounts,
   ensureChargeEurAmounts,
+  selectWithEurFallback,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
@@ -40,23 +41,23 @@ export async function GET() {
   const minYear = academicYear;
   const maxYear = academicYear + 1;
 
-  const [familiesRes, paymentsRes, chargesRes] = await Promise.all([
+  const [familiesRes, payments, charges] = await Promise.all([
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
-    db.from("payments")
-      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, eur_amount, eur_rate, eur_rate_date")
-      .gte("year", minYear)
-      .lte("year", maxYear),
-    db.from("charges")
-      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date")
-      .gte("year", minYear)
-      .lte("year", maxYear),
+    selectWithEurFallback<PaymentEurRow & {
+      family_id: string; payment_method: string; month: number | null; year: number | null;
+    }>(
+      (cols) => db.from("payments").select(cols).gte("year", minYear).lte("year", maxYear),
+      "id, family_id, amount, currency, payment_date, payment_method, month, year",
+      "payments",
+    ),
+    selectWithEurFallback<ChargeEurRow & { family_id: string }>(
+      (cols) => db.from("charges").select(cols).gte("year", minYear).lte("year", maxYear),
+      "id, family_id, amount, currency, month, year",
+      "charges",
+    ),
   ]);
 
   const families = familiesRes.data ?? [];
-  const payments = (paymentsRes.data ?? []) as Array<PaymentEurRow & {
-    family_id: string; payment_method: string; month: number | null; year: number | null;
-  }>;
-  const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
 
   await ensurePaymentEurAmounts(db, payments);
   await ensureChargeEurAmounts(db, charges);

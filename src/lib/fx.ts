@@ -264,15 +264,27 @@ export interface ChargeEurRow {
   eur_rate_date?: string | null;
 }
 
+// Persist errors that just mean "migration 004_eur_snapshot.sql isn't
+// applied yet". We swallow those silently so the request still succeeds
+// — the in-memory mutation already keeps totals correct — but log any
+// other error so genuine DB problems aren't hidden.
+function isMissingSnapshotColumnError(message: string | undefined | null): boolean {
+  if (!message) return false;
+  return /column\s+("?eur_amount"?|"?eur_rate"?|"?eur_rate_date"?)\b/i.test(message)
+    || /eur_amount.*does not exist/i.test(message);
+}
+
 /**
  * Self-heal: any row whose `eur_amount` is NULL gets a snapshot computed
  * now (using the historical rate for its date, with most-recent fallback)
- * and persisted back. Mutates each row in place so callers can sum
- * `eur_amount` afterwards without checking for nulls.
+ * and populated in memory. The DB is updated as a best-effort write —
+ * silently skipped when the snapshot columns don't exist yet (migration
+ * 004_eur_snapshot.sql not applied).
  *
- * This makes legacy rows (created before 004_eur_snapshot.sql) self-fill
- * on the first dashboard load after deploy. After that load, totals are
- * cheap straight sums.
+ * If no FX rate is available at all (e.g. fresh DB with empty
+ * `exchange_rates` for the row's currency), falls back to the native
+ * `amount` so the row still appears in totals. Better to overstate by
+ * the FX factor than to silently drop rows and return €0.
  */
 export async function ensurePaymentEurAmounts(
   db: SupabaseClient,
@@ -284,15 +296,31 @@ export async function ensurePaymentEurAmounts(
     const cur: Currency = (r.currency ?? "EUR") as Currency;
     const date = String(r.payment_date).slice(0, 10);
     const eur = await snapshotEurFields(Number(r.amount), cur, date);
+
+    // Mutate in memory FIRST so totals are correct regardless of whether
+    // we can persist back. If `snapshotEurFields` couldn't find any rate
+    // at all, fall back to the native `amount` so the row still appears
+    // in totals (overstates by the FX factor for non-EUR rows, but
+    // better than silently dropping rows and showing €0).
     if (eur.eur_amount != null) {
-      await db.from("payments").update({
+      r.eur_amount = eur.eur_amount;
+      r.eur_rate = eur.eur_rate;
+      r.eur_rate_date = eur.eur_rate_date;
+    } else {
+      r.eur_amount = Math.round(Number(r.amount) * 100) / 100;
+    }
+
+    // Best-effort persist. Skipped silently when the snapshot columns
+    // don't exist (migration 004_eur_snapshot.sql not applied yet).
+    if (eur.eur_amount != null) {
+      const { error } = await db.from("payments").update({
         eur_amount: eur.eur_amount,
         eur_rate: eur.eur_rate,
         eur_rate_date: eur.eur_rate_date,
       }).eq("id", r.id);
-      r.eur_amount = eur.eur_amount;
-      r.eur_rate = eur.eur_rate;
-      r.eur_rate_date = eur.eur_rate_date;
+      if (error && !isMissingSnapshotColumnError(error.message)) {
+        console.warn("[fx] payment EUR snapshot persist failed:", error.message);
+      }
     }
   }
 }
@@ -307,17 +335,61 @@ export async function ensureChargeEurAmounts(
     const cur: Currency = (r.currency ?? "EUR") as Currency;
     const date = `${r.year}-${String(r.month).padStart(2, "0")}-01`;
     const eur = await snapshotEurFields(Number(r.amount), cur, date);
+
     if (eur.eur_amount != null) {
-      await db.from("charges").update({
+      r.eur_amount = eur.eur_amount;
+      r.eur_rate = eur.eur_rate;
+      r.eur_rate_date = eur.eur_rate_date;
+    } else {
+      r.eur_amount = Math.round(Number(r.amount) * 100) / 100;
+    }
+
+    if (eur.eur_amount != null) {
+      const { error } = await db.from("charges").update({
         eur_amount: eur.eur_amount,
         eur_rate: eur.eur_rate,
         eur_rate_date: eur.eur_rate_date,
       }).eq("id", r.id);
-      r.eur_amount = eur.eur_amount;
-      r.eur_rate = eur.eur_rate;
-      r.eur_rate_date = eur.eur_rate_date;
+      if (error && !isMissingSnapshotColumnError(error.message)) {
+        console.warn("[fx] charge EUR snapshot persist failed:", error.message);
+      }
     }
   }
+}
+
+/**
+ * SELECT helper that degrades gracefully if the eur_amount/eur_rate/
+ * eur_rate_date columns from migration 004 don't exist yet. Tries the
+ * full SELECT first; on column-missing error, retries without those
+ * columns and logs a one-line warning so the config drift is visible.
+ *
+ * Use the returned rows the same as before — call ensure*EurAmounts to
+ * populate `eur_amount` in memory (it now computes on the fly when the
+ * snapshot is missing). This means totals work whether or not the
+ * migration has been applied to the live database.
+ */
+export async function selectWithEurFallback<T>(
+  build: (selectColumns: string) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  baseColumns: string,
+  table: "payments" | "charges" = "payments",
+): Promise<T[]> {
+  const snap = "eur_amount, eur_rate, eur_rate_date";
+  const res = await build(`${baseColumns}, ${snap}`);
+  if (!res.error) return ((res.data ?? []) as T[]);
+  if (!isMissingSnapshotColumnError(res.error.message)) {
+    console.warn(`[fx] ${table} SELECT failed:`, res.error.message);
+  } else {
+    console.warn(
+      `[fx] ${table} snapshot columns missing — falling back to on-the-fly EUR conversion. ` +
+        `Apply supabase/migrations/004_eur_snapshot.sql to enable persisted snapshots.`,
+    );
+  }
+  const fb = await build(baseColumns);
+  if (fb.error) {
+    console.error(`[fx] ${table} fallback SELECT failed:`, fb.error.message);
+    return [];
+  }
+  return ((fb.data ?? []) as T[]);
 }
 
 /**

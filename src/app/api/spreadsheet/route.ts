@@ -7,6 +7,7 @@ import {
   getRate,
   ensurePaymentEurAmounts,
   ensureChargeEurAmounts,
+  selectWithEurFallback,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
@@ -73,29 +74,30 @@ export async function GET() {
   const minYear = academicYear;
   const maxYear = academicYear + 1;
 
-  const [familiesRes, childrenRes, paymentsRes, chargesRes] = await Promise.all([
+  const [familiesRes, childrenRes, payments, charges] = await Promise.all([
     db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
     db.from("children").select("family_id, monthly_tuition, currency").eq("is_active", true),
-    db.from("payments")
-      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, notes, eur_amount, eur_rate, eur_rate_date")
-      .gte("year", minYear)
-      .lte("year", maxYear),
-    db.from("charges")
-      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date")
-      .gte("year", minYear)
-      .lte("year", maxYear),
+    selectWithEurFallback<PaymentEurRow & {
+      family_id: string; payment_method: string; month: number | null; year: number | null; notes: string | null;
+    }>(
+      (cols) => db.from("payments").select(cols).gte("year", minYear).lte("year", maxYear),
+      "id, family_id, amount, currency, payment_date, payment_method, month, year, notes",
+      "payments",
+    ),
+    selectWithEurFallback<ChargeEurRow & { family_id: string }>(
+      (cols) => db.from("charges").select(cols).gte("year", minYear).lte("year", maxYear),
+      "id, family_id, amount, currency, month, year",
+      "charges",
+    ),
   ]);
 
   if (familiesRes.error) return NextResponse.json({ error: familiesRes.error.message }, { status: 500 });
 
   const families = familiesRes.data ?? [];
   const children = (childrenRes.data ?? []) as Array<{ family_id: string; monthly_tuition: number; currency: Currency | null }>;
-  const payments = (paymentsRes.data ?? []) as Array<PaymentEurRow & {
-    family_id: string; payment_method: string; month: number | null; year: number | null; notes: string | null;
-  }>;
-  const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
 
-  // Self-heal any rows whose snapshot was never written.
+  // Populate eur_amount in memory (from the persisted snapshot when
+  // migration 004 is applied, on-the-fly otherwise).
   await ensurePaymentEurAmounts(db, payments);
   await ensureChargeEurAmounts(db, charges);
 

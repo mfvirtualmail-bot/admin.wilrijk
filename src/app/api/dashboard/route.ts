@@ -6,6 +6,7 @@ import {
   ensurePaymentEurAmounts,
   ensureChargeEurAmounts,
   snapshotEurFields,
+  selectWithEurFallback,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
@@ -19,30 +20,36 @@ export async function GET() {
 
   const db = createServerClient();
 
-  const [familiesRes, childrenRes, paymentsRes, tuitionRes, chargesRes, recentPaymentsRes] = await Promise.all([
+  const [familiesRes, childrenRes, paymentRows, tuitionRes, chargeRowsRaw, recentPaymentsRes] = await Promise.all([
     db.from("families").select("id", { count: "exact" }).eq("is_active", true),
     db.from("children").select("id", { count: "exact" }).eq("is_active", true),
-    db.from("payments").select("id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date"),
+    selectWithEurFallback<PaymentEurRow>(
+      (cols) => db.from("payments").select(cols),
+      "id, amount, currency, payment_date",
+      "payments",
+    ),
     db.from("children").select("monthly_tuition, currency").eq("is_active", true),
-    db.from("charges").select("id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date"),
+    selectWithEurFallback<ChargeEurRow>(
+      (cols) => db.from("charges").select(cols),
+      "id, amount, currency, month, year",
+      "charges",
+    ),
     db.from("payments")
       .select("id, amount, payment_date, payment_method, currency, families(name, father_name)")
       .order("payment_date", { ascending: false })
       .limit(5),
   ]);
 
-  // Self-heal any rows whose EUR snapshot was never written (legacy rows
-  // created before migration 004_eur_snapshot). After this call, every
-  // row's `eur_amount` is populated both in memory and in the database.
-  const paymentRows = (paymentsRes.data ?? []) as PaymentEurRow[];
+  // After ensure*, every row's eur_amount is populated in memory (from
+  // the persisted snapshot when migration 004 is applied, or computed
+  // on the fly otherwise — never null when there's data).
   await ensurePaymentEurAmounts(db, paymentRows);
   const totalPaid = paymentRows.reduce((s, p) => s + Number(p.eur_amount ?? 0), 0);
 
   // Only count charges for months that have already started.
   const now = new Date();
   const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
-  const chargeRows = ((chargesRes.data ?? []) as ChargeEurRow[])
-    .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey);
+  const chargeRows = chargeRowsRaw.filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey);
   await ensureChargeEurAmounts(db, chargeRows);
   const totalCharged = chargeRows.reduce((s, c) => s + Number(c.eur_amount ?? 0), 0);
   const totalDue = Math.max(0, totalCharged - totalPaid);

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import {
   ensurePaymentEurAmounts,
   ensureChargeEurAmounts,
+  selectWithEurFallback,
   type PaymentEurRow,
   type ChargeEurRow,
 } from "@/lib/fx";
@@ -24,23 +25,29 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const db = createServerClient();
-  const [famRes, chargesRes, paymentsRes] = await Promise.all([
+  const [famRes, chargeRowsRaw, paymentRows] = await Promise.all([
     db.from("families").select("*").order("name"),
-    db.from("charges").select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date"),
-    db.from("payments").select("id, family_id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date"),
+    selectWithEurFallback<ChargeEurRow & { family_id: string }>(
+      (cols) => db.from("charges").select(cols),
+      "id, family_id, amount, currency, month, year",
+      "charges",
+    ),
+    selectWithEurFallback<PaymentEurRow & { family_id: string }>(
+      (cols) => db.from("payments").select(cols),
+      "id, family_id, amount, currency, payment_date",
+      "payments",
+    ),
   ]);
   if (famRes.error) return NextResponse.json({ error: famRes.error.message }, { status: 500 });
 
-  // Compute per-family balance in EUR from the snapshot column. Charges
-  // count only if their month has started.
+  // Compute per-family balance in EUR. Charges count only if their month
+  // has started. ensure*EurAmounts populates eur_amount in memory whether
+  // or not migration 004_eur_snapshot is applied.
   const now = new Date();
   const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
 
-  const chargeRows = ((chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>)
-    .filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey);
+  const chargeRows = chargeRowsRaw.filter((c) => Number(c.year) * 12 + Number(c.month) <= currentKey);
   await ensureChargeEurAmounts(db, chargeRows);
-
-  const paymentRows = (paymentsRes.data ?? []) as Array<PaymentEurRow & { family_id: string }>;
   await ensurePaymentEurAmounts(db, paymentRows);
 
   const byFam = new Map<string, { charged: number; paid: number }>();
