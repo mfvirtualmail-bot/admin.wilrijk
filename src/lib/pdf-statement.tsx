@@ -13,6 +13,7 @@ import {
 } from "@react-pdf/renderer";
 import type { StatementData } from "./statement-data";
 import type { EmailSettings, Currency } from "./types";
+import { hebrewMonthLabel } from "./hebrew-date";
 
 // Register a combined Latin+Hebrew font so statements render correctly
 // regardless of locale AND so Hebrew in otherwise-English output (e.g. a
@@ -48,6 +49,12 @@ const SYM: Record<Currency, string> = { EUR: "€", USD: "$", GBP: "£" };
 function fmt(n: number, currency: Currency = "EUR"): string {
   const sym = SYM[currency] ?? "€";
   return sym + n.toLocaleString("nl-BE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatStatementDateHe(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return hebrewMonthLabel(d.getMonth() + 1, d.getFullYear());
 }
 
 interface Props {
@@ -112,7 +119,7 @@ export function StatementDocument({ data, settings }: Props) {
     row: { flexDirection: rtl ? "row-reverse" : "row", borderBottomWidth: 1, borderBottomColor: "#eee" },
     rowHeader: { backgroundColor: "#f3f4f6" },
     cell: { padding: 5, fontSize: 9 },
-    cellDate: { width: 60, textAlign: rtl ? "right" : "left" },
+    cellDate: { width: 85, textAlign: rtl ? "right" : "left" },
     cellDesc: { flex: 1, textAlign: rtl ? "right" : "left" },
     cellAmount: { width: 70, textAlign: rtl ? "left" : "right" },
     totalsBox: { marginTop: 14, padding: 10, backgroundColor: "#f9fafb", borderWidth: 1, borderColor: "#e5e7eb" },
@@ -153,7 +160,7 @@ export function StatementDocument({ data, settings }: Props) {
         {/* Meta block */}
         <View style={styles.metaRow}>
           <Text style={styles.metaLabel}>{lang.date}:</Text>
-          <Text style={styles.metaValue}>{data.statementDate}</Text>
+          <Text style={styles.metaValue}>{formatStatementDateHe(data.statementDate)}</Text>
         </View>
         <View style={styles.metaRow}>
           <Text style={styles.metaLabel}>{lang.family}:</Text>
@@ -194,7 +201,7 @@ export function StatementDocument({ data, settings }: Props) {
             </View>
             {data.lines.map((ln, i) => (
               <View key={i} style={styles.row}>
-                <Text style={[styles.cell, styles.cellDate]}>{ln.date}</Text>
+                <Text style={[styles.cell, styles.cellDate]}>{ln.displayDate}</Text>
                 <Text style={[styles.cell, styles.cellDesc]}>{ln.label}</Text>
                 <Text style={[styles.cell, styles.cellAmount]}>
                   {ln.charge > 0 ? fmt(ln.charge, data.currency) : ""}
