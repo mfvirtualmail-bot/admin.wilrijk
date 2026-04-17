@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { snapshotEurFields } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -55,6 +57,27 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const db = createServerClient();
+
+  // Re-snapshot the EUR equivalent if any of (amount, currency,
+  // payment_date) changed. We need the existing row to fill in whichever
+  // wasn't supplied in the patch.
+  if ("amount" in allowed || "currency" in allowed || "payment_date" in allowed) {
+    const { data: existing } = await db
+      .from("payments")
+      .select("amount, currency, payment_date")
+      .eq("id", params.id)
+      .single();
+    if (existing) {
+      const amount = Number(allowed.amount ?? existing.amount);
+      const cur: Currency = ((allowed.currency ?? existing.currency) ?? "EUR") as Currency;
+      const date = String(allowed.payment_date ?? existing.payment_date).slice(0, 10);
+      const eur = await snapshotEurFields(amount, cur, date);
+      allowed.eur_amount = eur.eur_amount;
+      allowed.eur_rate = eur.eur_rate;
+      allowed.eur_rate_date = eur.eur_rate_date;
+    }
+  }
+
   const { data, error } = await db
     .from("payments")
     .update(allowed)

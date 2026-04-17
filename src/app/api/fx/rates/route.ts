@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { getLatestKnownRates } from "@/lib/fx";
 import type { Currency, FxSource } from "@/lib/types";
 
 async function getSessionUser() {
@@ -32,7 +33,15 @@ export async function GET(req: NextRequest) {
   if (currency) query = query.eq("currency", currency);
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rates: data ?? [] });
+
+  // Also surface a per-currency "latest known" snapshot. This is what
+  // the EUR conversion will fall back to if a payment/charge is created
+  // for a date that has no rate published — surfacing it in Settings
+  // means you can see exactly which historical rate the app would
+  // reuse if ECB ever stopped responding.
+  const latest = await getLatestKnownRates();
+
+  return NextResponse.json({ rates: data ?? [], latest });
 }
 
 /** POST /api/fx/rates   Body: { date, currency, rate, source? }

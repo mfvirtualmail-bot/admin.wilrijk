@@ -422,8 +422,16 @@ export default function SettingsPage() {
 // ────────────────────────────────────────────────────────────────
 // Advanced tab: exchange rates table
 
+interface LatestRate {
+  currency: "USD" | "GBP";
+  rate: number;
+  rateDate: string;
+  source: FxSource;
+}
+
 function ExchangeRatesPanel() {
   const [rates, setRates] = useState<ExchangeRate[]>([]);
+  const [latest, setLatest] = useState<LatestRate[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -444,6 +452,7 @@ function ExchangeRatesPanel() {
     const res = await fetch(`/api/fx/rates?${params}`);
     const d = await res.json();
     setRates(d.rates ?? []);
+    setLatest(d.latest ?? []);
     setLoading(false);
   }
 
@@ -510,6 +519,33 @@ function ExchangeRatesPanel() {
           rate before it. You can add a manual row for any date to override the ECB rate
           or fill a gap.
         </p>
+      </div>
+
+      {/* Last-known fallback per currency. This is what the EUR
+          snapshot on new payments/charges will reuse if ECB ever
+          can't give us a rate for the requested date. */}
+      <div className="p-3 border border-blue-200 bg-blue-50 rounded-md">
+        <h4 className="text-sm font-semibold text-blue-900 mb-2">Last-known rate (fallback)</h4>
+        <p className="text-xs text-blue-800 mb-3">
+          If the ECB refresh ever fails, new payments and charges will be converted using
+          these rates. They are also what legacy rows with a missing EUR snapshot are
+          backfilled against.
+        </p>
+        {latest.length === 0 ? (
+          <p className="text-xs text-blue-700">No rates recorded yet. Click <strong>Refresh from ECB</strong> below.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {latest.map((l) => (
+              <div key={l.currency} className="bg-white border border-blue-100 rounded px-3 py-2 flex items-baseline gap-2 text-sm">
+                <span className="font-semibold text-blue-900 w-10">{l.currency}</span>
+                <span className="font-mono text-gray-900">{Number(l.rate).toFixed(6)}</span>
+                <span className="text-xs text-gray-500 ml-auto">
+                  {l.rateDate} · {l.source === "manual" ? "manual" : "ECB"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">

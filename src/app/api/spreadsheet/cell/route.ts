@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
+import { snapshotEurFields } from "@/lib/fx";
+import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -42,7 +44,17 @@ export async function PUT(req: NextRequest) {
 
   if (paymentId) {
     // Update existing payment — do NOT change its currency from here;
-    // the spreadsheet only edits amount/method/date/notes inline.
+    // the spreadsheet only edits amount/method/date/notes inline. We
+    // still re-snapshot the EUR equivalent because amount and date
+    // can both have moved.
+    const { data: existing } = await db
+      .from("payments")
+      .select("currency")
+      .eq("id", paymentId)
+      .single();
+    const cur: Currency = ((existing?.currency ?? parsedCurrency) ?? "EUR") as Currency;
+    const eur = await snapshotEurFields(parsedAmount, cur, paymentDate);
+
     const { data, error } = await db
       .from("payments")
       .update({
@@ -50,6 +62,9 @@ export async function PUT(req: NextRequest) {
         payment_date: paymentDate,
         payment_method: paymentMethod,
         notes: notes ?? null,
+        eur_amount: eur.eur_amount,
+        eur_rate: eur.eur_rate,
+        eur_rate_date: eur.eur_rate_date,
         updated_at: new Date().toISOString(),
       })
       .eq("id", paymentId)
@@ -60,8 +75,8 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ payment: data });
   } else {
     // Create new payment in the family's base currency (passed from the
-    // client). That matches where tuition is billed; if the gabbai needs
-    // a different currency, he edits the payment on the family page.
+    // client). Snapshot the EUR equivalent at the rate for `paymentDate`.
+    const eur = await snapshotEurFields(parsedAmount, parsedCurrency as Currency, paymentDate);
     const { data, error } = await db
       .from("payments")
       .insert({
@@ -73,6 +88,9 @@ export async function PUT(req: NextRequest) {
         month: Number(month),
         year: Number(year),
         notes: notes ?? null,
+        eur_amount: eur.eur_amount,
+        eur_rate: eur.eur_rate,
+        eur_rate_date: eur.eur_rate_date,
       })
       .select()
       .single();

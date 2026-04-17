@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getEnrollmentMonths } from "./family-utils";
+import { snapshotEurFields } from "./fx";
 import type { Currency } from "./types";
 
 /**
@@ -24,14 +25,27 @@ export async function generateChargesForChild(
   const months = getEnrollmentMonths(startMonth, startYear, endMonth, endYear, baseYear);
   if (months.length === 0) return 0;
 
-  const rows = months.map(({ month, year }) => ({
-    child_id: childId,
-    family_id: familyId,
-    month,
-    year,
-    amount: monthlyTuition,
-    currency,
-  }));
+  // Snapshot the EUR equivalent for each month using the rate as of the
+  // first day of that month, so future reads never have to re-resolve FX
+  // for these charges (and never silently drop them when no rate exists
+  // for that date later).
+  const rows = await Promise.all(
+    months.map(async ({ month, year }) => {
+      const date = `${year}-${String(month).padStart(2, "0")}-01`;
+      const eur = await snapshotEurFields(monthlyTuition, currency, date);
+      return {
+        child_id: childId,
+        family_id: familyId,
+        month,
+        year,
+        amount: monthlyTuition,
+        currency,
+        eur_amount: eur.eur_amount,
+        eur_rate: eur.eur_rate,
+        eur_rate_date: eur.eur_rate_date,
+      };
+    }),
+  );
 
   const { data, error } = await db
     .from("charges")
