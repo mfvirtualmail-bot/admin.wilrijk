@@ -696,6 +696,7 @@ function SnapshotStatusPanel() {
   const [fetchingEcb, setFetchingEcb] = useState(false);
   const [fetchingHistory, setFetchingHistory] = useState(false);
   const [resnapshotting, setResnapshotting] = useState(false);
+  const [pruning, setPruning] = useState(false);
   const [preCharging, setPreCharging] = useState(false);
   const [backfillingHebrew, setBackfillingHebrew] = useState(false);
   const [nextHebrewMonth, setNextHebrewMonth] = useState<{ name: string; year: number } | null>(null);
@@ -863,6 +864,38 @@ function SnapshotStatusPanel() {
       setErr((e as Error).message);
     } finally {
       setFetchingEcb(false);
+      load();
+    }
+  }
+
+  // --- 1a'. Prune old ECB rates (keep last N years). Supabase/PostgREST
+  //          has a 1000-row default SELECT limit; a table with 27 years
+  //          of daily rates quietly breaks rate lookup when a regression
+  //          in pagination code forgets to paginate. Keeping the table
+  //          small makes that failure mode impossible to hit.
+  async function handlePrune() {
+    if (!confirm(
+      "Delete ECB exchange_rates rows older than 2 years? Older rates aren't needed " +
+      "because no payment or charge in the system goes back that far. Safe and reversible: " +
+      "click Fetch full history any time to repopulate.",
+    )) return;
+    setPruning(true);
+    setErr(null);
+    setProgress("Pruning old rates…");
+    try {
+      const res = await fetch("/api/fx/prune-old-rates?years=2", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Prune failed");
+      const parts = [`Deleted ${d.totalDeleted} row(s) older than ${d.cutoffDate}`];
+      const byCur = d.byCurrency as Record<string, number>;
+      if (byCur && Object.keys(byCur).length > 0) {
+        parts.push(Object.entries(byCur).map(([c, n]) => `${c}: ${n}`).join(", "));
+      }
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPruning(false);
       load();
     }
   }
@@ -1035,7 +1068,7 @@ function SnapshotStatusPanel() {
   const anyFallback = status && (status.fallbackPayments > 0 || status.fallbackCharges > 0);
   const ratesStale = status?.rates.some((r) => r.daysOld > 7) ?? false;
   const noRates = (status?.rates.length ?? 0) === 0;
-  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting || preCharging || backfillingHebrew || chargingSpecific;
+  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting || pruning || preCharging || backfillingHebrew || chargingSpecific;
 
   return (
     <div className="border border-gray-200 rounded-md p-4 bg-white">
@@ -1136,6 +1169,14 @@ function SnapshotStatusPanel() {
                   className="px-2.5 py-1 border border-gray-300 text-gray-700 rounded text-xs hover:bg-white disabled:opacity-50"
                 >
                   Force today
+                </button>
+                <button
+                  onClick={handlePrune}
+                  disabled={anyBusy}
+                  title="Delete exchange_rates rows older than 2 years. Keeps the table small so PostgREST's 1000-row default limit never becomes a problem again."
+                  className="px-2.5 py-1 border border-gray-300 text-gray-700 rounded text-xs hover:bg-white disabled:opacity-50"
+                >
+                  {pruning ? "Pruning…" : "Prune >2y"}
                 </button>
               </div>
             </div>
