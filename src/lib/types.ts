@@ -86,8 +86,18 @@ export interface Charge {
   id: string;
   child_id: string;
   family_id: string;
+  /** Gregorian month (1-12) of the Rosh Chodesh that triggered this charge. */
   month: number;
+  /** Gregorian year of the Rosh Chodesh that triggered this charge. */
   year: number;
+  /** Hebrew month (hebcal numbering: 1=Nisan..6=Elul, 7=Tishrei..12=Adar/
+   *  Adar I, 13=Adar II in leap years). Primary identity of the charge —
+   *  (child_id, hebrew_month, hebrew_year) is uniquely indexed. Nullable
+   *  only on rows that predate migration 006 and haven't been backfilled
+   *  yet — always populated on new inserts. */
+  hebrew_month: number | null;
+  /** Hebrew year (e.g. 5786). See hebrew_month. */
+  hebrew_year: number | null;
   amount: number;
   currency: Currency;
   notes: string | null;

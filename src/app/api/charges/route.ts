@@ -37,11 +37,16 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/charges — Generate missing charges for active students.
-// Body: { family_id?, child_id? }  (optional filters)
+//
+// Body (all optional):
+//   { family_id?, child_id?, through_date? }
 //
 // Uses the current enrollment window on each student: charges are
-// generated from enrollment_start up to min(enrollment_end, today).
-// Idempotent — existing (child_id, month, year) rows are preserved.
+// generated from enrollment_start up to min(enrollment_end, through_date).
+// `through_date` defaults to today; pass a future YYYY-MM-DD to pre-bill
+// upcoming Hebrew months. Idempotent — existing (child_id, hebrew_month,
+// hebrew_year) rows are preserved, safe to combine with the Rosh-Chodesh
+// cron.
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -51,6 +56,15 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const db = createServerClient();
+
+  let throughDate: Date | undefined;
+  if (typeof body.through_date === "string" && body.through_date.length > 0) {
+    const parsed = new Date(body.through_date);
+    if (isNaN(parsed.getTime())) {
+      return NextResponse.json({ error: "Invalid through_date" }, { status: 400 });
+    }
+    throughDate = parsed;
+  }
 
   // Load children to generate charges for
   let childQuery = db.from("children").select("*").eq("is_active", true);
@@ -77,6 +91,7 @@ export async function POST(req: NextRequest) {
       child.enrollment_start_year,
       child.enrollment_end_month,
       child.enrollment_end_year,
+      throughDate,
     );
     totalCreated += created;
   }
