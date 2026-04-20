@@ -795,6 +795,8 @@ function SnapshotStatusPanel() {
     setProgress(`Re-snapshotting ${label}…`);
     let totalPayments = 0;
     let totalCharges = 0;
+    let clearedPayments = 0;
+    let clearedCharges = 0;
     try {
       // First call uses the chosen include= mode (NULLs out the
       // targeted rows then re-snapshots). Subsequent calls continue
@@ -806,16 +808,23 @@ function SnapshotStatusPanel() {
         if (!res.ok) throw new Error(d.error ?? "Re-snapshot failed");
         totalPayments += d.updatedPayments ?? 0;
         totalCharges += d.updatedCharges ?? 0;
+        if (i === 0) {
+          clearedPayments = d.clearedPayments ?? 0;
+          clearedCharges = d.clearedCharges ?? 0;
+        }
         const remaining = (d.remainingPayments ?? 0) + (d.remainingCharges ?? 0);
         setProgress(
-          `Pass ${i + 1}: wrote ${d.updatedPayments} payment(s) + ${d.updatedCharges} charge(s); ${remaining} row(s) pending`,
+          `Pass ${i + 1}: cleared ${clearedPayments}+${clearedCharges}, wrote ${d.updatedPayments} payment(s) + ${d.updatedCharges} charge(s); ${remaining} row(s) pending`,
         );
         if (remaining === 0) break;
         if ((d.updatedPayments ?? 0) + (d.updatedCharges ?? 0) === 0) {
           throw new Error(`Stopped — ${remaining} row(s) still have no usable rate. Fetch ECB history or add a manual rate.`);
         }
       }
-      setProgress(`Done. Re-snapshotted ${totalPayments} payment(s) + ${totalCharges} charge(s) using current rate table.`);
+      setProgress(
+        `Done. Cleared ${clearedPayments} payment(s) + ${clearedCharges} charge(s); ` +
+        `re-snapshotted ${totalPayments} payment(s) + ${totalCharges} charge(s) using current rate table.`,
+      );
     } catch (e) {
       setErr((e as Error).message);
     } finally {

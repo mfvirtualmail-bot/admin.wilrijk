@@ -61,27 +61,41 @@ export async function POST(req: Request) {
   // Clear eur_amount on the targeted rows so the standard `is
   // eur_amount null` path picks them up for re-snapshot. 'manual'
   // rows are never cleared — those were set deliberately.
+  //
+  // Important: PostgREST's `.or("col.neq.val,col.is.null")` is unreliable
+  // for this — in practice the neq branch returns `null !== 'x'` → null
+  // → not-matched, and the is.null branch gets dropped in the OR chain
+  // too. Result: the clear UPDATE touched zero rows. Split into two
+  // explicit updates instead; also surface the row counts so a future
+  // regression is visible.
+  const clearFields = { eur_amount: null, eur_rate: null, eur_rate_date: null, eur_rate_kind: null };
+  let clearedPayments = 0;
+  let clearedCharges = 0;
   if (includeFallback) {
-    await Promise.all([
-      db.from("payments").update({
-        eur_amount: null, eur_rate: null, eur_rate_date: null, eur_rate_kind: null,
-      }).eq("eur_rate_kind", "fallback"),
-      db.from("charges").update({
-        eur_amount: null, eur_rate: null, eur_rate_date: null, eur_rate_kind: null,
-      }).eq("eur_rate_kind", "fallback"),
+    const [p, c] = await Promise.all([
+      db.from("payments").update(clearFields).eq("eur_rate_kind", "fallback").select("id"),
+      db.from("charges").update(clearFields).eq("eur_rate_kind", "fallback").select("id"),
     ]);
+    if (p.error) return NextResponse.json({ error: `Clear payments failed: ${p.error.message}` }, { status: 500 });
+    if (c.error) return NextResponse.json({ error: `Clear charges failed: ${c.error.message}` }, { status: 500 });
+    clearedPayments = p.data?.length ?? 0;
+    clearedCharges = c.data?.length ?? 0;
   } else if (includeNonManual) {
-    // Clear every non-EUR, non-manual row. We match by `eur_rate_kind
-    // <> 'manual' OR eur_rate_kind IS NULL`. Supabase-js doesn't have
-    // a direct "not equal OR is null" so we do it with .or().
-    await Promise.all([
-      db.from("payments").update({
-        eur_amount: null, eur_rate: null, eur_rate_date: null, eur_rate_kind: null,
-      }).or("eur_rate_kind.neq.manual,eur_rate_kind.is.null"),
-      db.from("charges").update({
-        eur_amount: null, eur_rate: null, eur_rate_date: null, eur_rate_kind: null,
-      }).or("eur_rate_kind.neq.manual,eur_rate_kind.is.null"),
-    ]);
+    // Run two UPDATEs per table: one for kind='historical', one for
+    // kind='fallback'. NULL-kind rows are already picked up by the
+    // `is eur_amount null` SELECT later, and we explicitly avoid
+    // touching 'manual' rows.
+    const kindsToClear = ["historical", "fallback"];
+    for (const k of kindsToClear) {
+      const [p, c] = await Promise.all([
+        db.from("payments").update(clearFields).eq("eur_rate_kind", k).select("id"),
+        db.from("charges").update(clearFields).eq("eur_rate_kind", k).select("id"),
+      ]);
+      if (p.error) return NextResponse.json({ error: `Clear payments (${k}) failed: ${p.error.message}` }, { status: 500 });
+      if (c.error) return NextResponse.json({ error: `Clear charges (${k}) failed: ${c.error.message}` }, { status: 500 });
+      clearedPayments += p.data?.length ?? 0;
+      clearedCharges += c.data?.length ?? 0;
+    }
   }
 
   const [{ data: payRows, error: payErr }, { data: chgRows, error: chgErr }] = await Promise.all([
@@ -119,5 +133,7 @@ export async function POST(req: Request) {
     updatedCharges,
     remainingPayments: remainingPayments ?? 0,
     remainingCharges: remainingCharges ?? 0,
+    clearedPayments,
+    clearedCharges,
   });
 }
