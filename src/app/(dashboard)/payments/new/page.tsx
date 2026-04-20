@@ -44,7 +44,7 @@ export default function NewPaymentPage() {
   }, [defaultMethod]);
   const [month, setMonth] = useState<string>("");
   const [year, setYear] = useState<string>("");
-  const [allocateMonth, setAllocateMonth] = useState(true);
+  const [allocateMonth, setAllocateMonth] = useState(false);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -185,20 +185,27 @@ export default function NewPaymentPage() {
               </select>
             </div>
 
-            {/* Month allocation */}
-            <div className="border border-gray-200 rounded-md p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700">Allocate to a month?</span>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={allocateMonth} onChange={(e) => handleAllocateToggle(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 rounded" />
-                  <span className="text-sm text-gray-600">Yes, allocate to month</span>
-                </label>
-              </div>
-
-              {allocateMonth && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
+            {/* Month allocation — small link, hidden by default.
+                By default a payment just adds to the family's balance. */}
+            <div className="text-xs">
+              {!allocateMonth ? (
+                <button
+                  type="button"
+                  onClick={() => handleAllocateToggle(true)}
+                  className="text-blue-600 hover:underline"
+                >
+                  + Allocate to a specific month (advanced)
+                </button>
+              ) : (
+                <div className="border border-gray-200 rounded-md p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-700">Allocate to month</span>
+                    <button
+                      type="button"
+                      onClick={() => handleAllocateToggle(false)}
+                      className="text-gray-500 hover:text-gray-700"
+                    >Remove</button>
+                  </div>
                   <select
                     value={month && year ? `${month}:${year}` : ""}
                     onChange={(e) => {
@@ -212,19 +219,15 @@ export default function NewPaymentPage() {
                       <option key={`${m}:${y}`} value={`${m}:${y}`}>{label}</option>
                     ))}
                   </select>
+                  {autoMonth && (
+                    <p className="text-[11px] text-green-700 bg-green-50 rounded px-2 py-1" dir="rtl">
+                      Auto-detected next due month: <strong>{hebrewMonthLabel(autoMonth.month, autoMonth.year)}</strong>
+                    </p>
+                  )}
+                  <p className="text-[11px] text-gray-500">
+                    Normally payments just add to the family balance. Use this only when you want to mark a specific month as paid.
+                  </p>
                 </div>
-              )}
-
-              {!allocateMonth && (
-                <p className="text-xs text-gray-500 italic">
-                  Payment will be recorded without a specific month. You can allocate it later.
-                </p>
-              )}
-
-              {autoMonth && allocateMonth && (
-                <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1" dir="rtl">
-                  Auto-detected next due month: <strong>{hebrewMonthLabel(autoMonth.month, autoMonth.year)}</strong>
-                </p>
               )}
             </div>
 

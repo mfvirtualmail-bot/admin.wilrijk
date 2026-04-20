@@ -7,30 +7,26 @@ import {
   ModuleRegistry,
   type ColDef,
   type ColGroupDef,
-  type CellValueChangedEvent,
   type GetRowIdParams,
   type ValueGetterParams,
-  type ValueSetterParams,
+  type ICellRendererParams,
   themeQuartz,
 } from "ag-grid-community";
 import Header from "@/components/Header";
-import { useAuth } from "@/lib/auth-context";
-import { METHOD_LABELS, CURRENCY_SYMBOLS, formatCurrency } from "@/lib/payment-utils";
+import AddPaymentModal from "@/components/AddPaymentModal";
+import { CURRENCY_SYMBOLS, formatCurrency } from "@/lib/payment-utils";
 import { academicYearLabel } from "@/lib/hebrew-date";
-import type { PaymentMethod, Currency } from "@/lib/types";
+import type { Currency } from "@/lib/types";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-// AG Grid theme with large fonts for accessibility
 const gridTheme = themeQuartz.withParams({
   fontSize: 15,
-  rowHeight: 38,
+  rowHeight: 40,
   headerHeight: 40,
   headerFontSize: 13,
   headerFontWeight: 600,
 });
-
-const METHODS = Object.keys(METHOD_LABELS) as PaymentMethod[];
 
 interface MonthMeta { month: number; year: number; key: string; hebrewLabel: string }
 
@@ -64,7 +60,6 @@ function formatDateShort(iso: string | null) {
 }
 
 export default function SpreadsheetPage() {
-  const { user } = useAuth();
   const gridRef = useRef<AgGridReact>(null);
 
   const [rowData, setRowData] = useState<SpreadsheetRow[]>([]);
@@ -72,11 +67,9 @@ export default function SpreadsheetPage() {
   const [academicYear, setAcademicYear] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [modalFamily, setModalFamily] = useState<SpreadsheetRow | null>(null);
 
-  const canEdit = user?.is_super_admin;
-
-  useEffect(() => {
+  const loadData = useCallback(() => {
     fetch("/api/spreadsheet")
       .then((r) => r.json())
       .then((d) => {
@@ -89,82 +82,36 @@ export default function SpreadsheetPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Save a cell change to the server, then refetch the whole row set so
-  // the FX-converted summary totals (which depend on today's rate) stay
-  // authoritative and don't drift against the server's view.
-  const saveCell = useCallback(async (
-    familyId: string,
-    month: number,
-    year: number,
-    monthKey: string,
-    field: "amount" | "method" | "date" | "notes",
-    newValue: unknown,
-    rowNode: SpreadsheetRow,
-  ) => {
-    const cellData = (rowNode[monthKey] as CellData) ?? {};
-    const updated: CellData = { ...cellData, [field]: newValue };
+  useEffect(() => { loadData(); }, [loadData]);
 
-    setSaveStatus("saving");
-    try {
-      const res = await fetch("/api/spreadsheet/cell", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          familyId,
-          month,
-          year,
-          amount: updated.amount,
-          method: updated.method || "kas",
-          date: updated.date,
-          notes: updated.notes,
-          paymentId: updated.paymentId,
-          currency: updated.currency ?? rowNode.baseCurrency,
-        }),
-      });
-      if (!res.ok) { setSaveStatus("error"); return; }
-
-      const fresh = await fetch("/api/spreadsheet");
-      const freshData = await fresh.json();
-      if (freshData.rows) setRowData(freshData.rows);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 1500);
-    } catch {
-      setSaveStatus("error");
-    }
-  }, []);
-
-  const onCellValueChanged = useCallback((event: CellValueChangedEvent) => {
-    if (!canEdit) return;
-    const { colDef, data, newValue, oldValue } = event;
-    const field = colDef.field as string;
-    if (!field || !field.includes("|")) return;
-
-    // Second line of defence against an invalid amount edit destroying a
-    // payment: if the amount field got NaN past the value setter, treat
-    // the edit as a no-op (same value as before) so the API call never
-    // converts a typo into a delete.
-    if (field.endsWith("|amount")) {
-      const isExplicitClear = newValue === null || newValue === "" || newValue === undefined;
-      const isValidNumber = typeof newValue === "number" && Number.isFinite(newValue);
-      if (!isExplicitClear && !isValidNumber) {
-        event.node?.setDataValue(colDef.field as string, oldValue);
-        return;
-      }
-    }
-
-    const [monthKey, subField] = field.split("|");
-    const [, monthStr, yearStr] = monthKey.split("_");
-    const month = Number(monthStr);
-    const year = Number(yearStr);
-
-    saveCell(data.familyId, month, year, monthKey, subField as "amount" | "method" | "date" | "notes", newValue, data);
-  }, [canEdit, saveCell]);
-
-  // Build column definitions
+  // View-only — inline editing removed. Corrections happen via the family detail page
+  // or via the "+ Payment" button that opens the floating modal.
   const columnDefs = useMemo<(ColDef | ColGroupDef)[]>(() => {
     if (!months.length) return [];
 
     const cols: (ColDef | ColGroupDef)[] = [
+      {
+        headerName: "",
+        field: "_addPayment",
+        pinned: "left",
+        width: 56,
+        editable: false,
+        sortable: false,
+        filter: false,
+        cellRenderer: (p: ICellRendererParams) => {
+          const row = p.data as SpreadsheetRow | undefined;
+          if (!row) return null;
+          const btn = document.createElement("button");
+          btn.textContent = "+ €";
+          btn.className =
+            "w-full h-7 rounded bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700";
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            setModalFamily(row);
+          };
+          return btn;
+        },
+      },
       {
         field: "familyName",
         headerName: "Family",
@@ -176,26 +123,19 @@ export default function SpreadsheetPage() {
       },
     ];
 
-    // One column group per month
     for (const { hebrewLabel, key } of months) {
-      const label = hebrewLabel;
       cols.push({
-        headerName: label,
+        headerName: hebrewLabel,
         groupId: key,
         children: [
           {
             field: `${key}|date`,
             headerName: "Date",
             width: 95,
-            editable: canEdit,
+            editable: false,
             valueGetter: (p: ValueGetterParams) => {
               const cell = p.data?.[key] as CellData;
               return formatDateShort(cell?.date ?? null);
-            },
-            valueSetter: (p: ValueSetterParams) => {
-              if (!p.data[key]) p.data[key] = { paymentId: null, date: null, method: null, amount: null, notes: null };
-              (p.data[key] as CellData).date = p.newValue || null;
-              return true;
             },
             cellStyle: (p) => {
               const cell = p.data?.[key] as CellData;
@@ -206,17 +146,10 @@ export default function SpreadsheetPage() {
             field: `${key}|method`,
             headerName: "COM",
             width: 90,
-            editable: canEdit,
-            cellEditor: "agSelectCellEditor",
-            cellEditorParams: { values: METHODS },
+            editable: false,
             valueGetter: (p: ValueGetterParams) => {
               const cell = p.data?.[key] as CellData;
               return cell?.method ?? "";
-            },
-            valueSetter: (p: ValueSetterParams) => {
-              if (!p.data[key]) p.data[key] = { paymentId: null, date: null, method: null, amount: null, notes: null };
-              (p.data[key] as CellData).method = p.newValue || null;
-              return true;
             },
             cellStyle: (p) => {
               const cell = p.data?.[key] as CellData;
@@ -232,26 +165,11 @@ export default function SpreadsheetPage() {
             field: `${key}|amount`,
             headerName: "Amount",
             width: 95,
-            editable: canEdit,
+            editable: false,
             type: "numericColumn",
             valueGetter: (p: ValueGetterParams) => {
               const cell = p.data?.[key] as CellData;
               return cell?.amount ?? null;
-            },
-            valueSetter: (p: ValueSetterParams) => {
-              if (!p.data[key]) p.data[key] = { paymentId: null, date: null, method: null, amount: null, currency: null, notes: null };
-              // An explicit empty clear means "delete this payment"; anything
-              // non-numeric (e.g. the user tried to rewrite "$100" as "€100")
-              // is rejected so we never silently wipe a payment + its method
-              // + its date because of a typo.
-              if (p.newValue === "" || p.newValue === null || p.newValue === undefined) {
-                (p.data[key] as CellData).amount = null;
-                return true;
-              }
-              const val = Number(p.newValue);
-              if (!Number.isFinite(val)) return false;
-              (p.data[key] as CellData).amount = val;
-              return true;
             },
             valueFormatter: (p) => {
               if (p.value == null) return "";
@@ -264,18 +182,15 @@ export default function SpreadsheetPage() {
               const monthlyTuition = p.data?.monthlyTuition ?? 0;
               const amount = cell?.amount ?? 0;
               if (!monthlyTuition) return {};
-              if (!amount) return { backgroundColor: "#fef2f2", color: "#dc2626" }; // red = unpaid
-              if (amount >= monthlyTuition) return { backgroundColor: "#f0fdf4", color: "#16a34a" }; // green = paid
-              return { backgroundColor: "#fefce8", color: "#ca8a04" }; // yellow = partial
+              if (!amount) return { backgroundColor: "#fef2f2", color: "#dc2626" };
+              if (amount >= monthlyTuition) return { backgroundColor: "#f0fdf4", color: "#16a34a" };
+              return { backgroundColor: "#fefce8", color: "#ca8a04" };
             },
           },
         ] as ColDef[],
       } as ColGroupDef);
     }
 
-    // Summary columns — always in the family's base currency (the child's
-    // tuition currency). Everything paid in a different currency is
-    // converted to the base currency at today's FX rate on the server.
     const fmtBase = (p: { value: unknown; data?: { baseCurrency?: Currency } }) => {
       if (p.value == null || p.value === "") return "";
       const cur: Currency = (p.data?.baseCurrency as Currency) ?? "EUR";
@@ -316,17 +231,17 @@ export default function SpreadsheetPage() {
     );
 
     return cols;
-  }, [months, canEdit]);
+  }, [months]);
 
   const defaultColDef = useMemo<ColDef>(() => ({
     sortable: false,
     resizable: true,
     suppressMovable: true,
+    editable: false,
   }), []);
 
   const getRowId = useCallback((params: GetRowIdParams) => params.data.familyId, []);
 
-  // Excel export using xlsx library
   async function handleExport() {
     const { utils, writeFile } = await import("xlsx");
     const headers = ["Family", "Currency"];
@@ -357,9 +272,6 @@ export default function SpreadsheetPage() {
     writeFile(wb, `tuition-${academicYear}-${academicYear + 1}.xlsx`);
   }
 
-  // Per-currency grand totals. Families whose tuition is in GBP can't be
-  // meaningfully summed with EUR families, so we keep one subtotal per
-  // currency and render them side-by-side.
   const paidByCur = new Map<Currency, number>();
   const dueByCur = new Map<Currency, number>();
   for (const r of rowData) {
@@ -376,7 +288,6 @@ export default function SpreadsheetPage() {
     <div className="flex flex-col h-screen">
       <Header titleKey="page.spreadsheet" />
 
-      {/* Toolbar */}
       <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200 text-sm flex-wrap">
         <span className="font-semibold text-gray-700" dir="rtl">
           {academicYear ? academicYearLabel(academicYear) : ""}
@@ -387,9 +298,6 @@ export default function SpreadsheetPage() {
         <span className="text-gray-600">Total due: <strong className="text-red-600">{fmtTotals(dueByCur)}</strong></span>
 
         <div className="ml-auto flex items-center gap-3">
-          {saveStatus === "saving" && <span className="text-blue-600 text-xs animate-pulse">Saving…</span>}
-          {saveStatus === "saved" && <span className="text-green-600 text-xs">Saved ✓</span>}
-          {saveStatus === "error" && <span className="text-red-600 text-xs">Save failed!</span>}
           <button
             onClick={handleExport}
             className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-xs font-medium"
@@ -399,12 +307,11 @@ export default function SpreadsheetPage() {
         </div>
       </div>
 
-      {/* Legend */}
       <div className="flex items-center gap-4 px-4 py-1.5 bg-gray-50 border-b border-gray-200 text-xs text-gray-600">
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Paid</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Unpaid</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300 inline-block" /> Partial</span>
-        {canEdit && <span className="text-gray-400">Click any cell to edit · Tab to move · Enter to confirm</span>}
+        <span className="text-gray-400">View-only — use <strong className="text-blue-700">+ €</strong> to add a payment</span>
       </div>
 
       {error && <div className="m-4 bg-red-50 border border-red-200 text-red-700 rounded-md p-3 text-sm">{error}</div>}
@@ -420,13 +327,21 @@ export default function SpreadsheetPage() {
             defaultColDef={defaultColDef}
             theme={gridTheme}
             getRowId={getRowId}
-            onCellValueChanged={onCellValueChanged}
-            stopEditingWhenCellsLoseFocus
             enableCellTextSelection
             suppressRowClickSelection
             animateRows={false}
           />
         </div>
+      )}
+
+      {modalFamily && (
+        <AddPaymentModal
+          familyId={modalFamily.familyId}
+          familyName={modalFamily.familyName}
+          baseCurrency={modalFamily.baseCurrency}
+          onClose={() => setModalFamily(null)}
+          onSaved={() => { setModalFamily(null); loadData(); }}
+        />
       )}
     </div>
   );
