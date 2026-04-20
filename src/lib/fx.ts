@@ -174,7 +174,7 @@ export async function convertToEur(
  * Sorted ascending by date so we can binary-search for the latest-on-or-
  * before-a-date lookup.
  */
-interface CurrencyRateTable {
+export interface CurrencyRateTable {
   rows: Array<{ date: string; rate: number; source: FxSource }>;
   latest: { date: string; rate: number; source: FxSource } | null;
 }
@@ -513,6 +513,36 @@ export function fillChargeEurInMemory(
     const c = r as ChargeEurRow;
     return `${c.year}-${String(c.month).padStart(2, "0")}-01`;
   });
+}
+
+/**
+ * Convert an EUR amount to `targetCurrency` as of `date`, using already-
+ * loaded rate tables. Returns `null` when no rate is available. The
+ * statement allocator uses this to express charges and payments in the
+ * family's statement currency.
+ *
+ * Rate picking follows the same historical-then-fallback policy as
+ * `getRateForSnapshot`: latest rate on or before `date`, else earliest
+ * rate strictly after (last-resort when the DB has no rate that early).
+ */
+export function convertEurInMemory(
+  eurAmount: number,
+  targetCurrency: Currency,
+  date: string,
+  tables: Map<Currency, CurrencyRateTable>,
+): { amount: number; rate: number; rateDate: string } | null {
+  if (targetCurrency === "EUR") {
+    return { amount: Math.round(eurAmount * 100) / 100, rate: 1, rateDate: date };
+  }
+  const table = tables.get(targetCurrency);
+  if (!table) return null;
+  const picked = pickRate(table, date);
+  if (!picked) return null;
+  return {
+    amount: Math.round(eurAmount * picked.rate * 100) / 100,
+    rate: picked.rate,
+    rateDate: picked.rateDate,
+  };
 }
 
 /** Accept 'usd' / 'Usd' / ' USD ' / etc. — reject blanks and unsupported. */
