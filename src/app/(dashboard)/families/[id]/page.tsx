@@ -11,6 +11,7 @@ import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import { familyDisplayName } from "@/lib/family-utils";
 import type { Family, Child, Payment, PaymentMethod, Currency } from "@/lib/types";
 import FxProvenance from "@/components/FxProvenance";
+import HebrewMonthYearPicker from "@/components/HebrewMonthYearPicker";
 
 interface FamilyData {
   family: Family;
@@ -132,10 +133,10 @@ export default function FamilyDetailPage() {
         monthly_tuition: Number(childForm.monthly_tuition) || 0,
         currency: childForm.currency || "EUR",
         class_name: childForm.class_name || null,
-        enrollment_start_month: Number(childForm.enrollment_start_month) || 9,
-        enrollment_start_year: Number(childForm.enrollment_start_year) || null,
-        enrollment_end_month: Number(childForm.enrollment_end_month) || 8,
-        enrollment_end_year: Number(childForm.enrollment_end_year) || null,
+        enrollment_start_month: childForm.enrollment_start_month ? Number(childForm.enrollment_start_month) : null,
+        enrollment_start_year: childForm.enrollment_start_year ? Number(childForm.enrollment_start_year) : null,
+        enrollment_end_month: childForm.enrollment_end_month ? Number(childForm.enrollment_end_month) : null,
+        enrollment_end_year: childForm.enrollment_end_year ? Number(childForm.enrollment_end_year) : null,
       }),
     });
     if (res.ok) {
@@ -168,10 +169,10 @@ export default function FamilyDetailPage() {
       monthly_tuition: String(c.monthly_tuition),
       class_name: c.class_name ?? "",
       currency: c.currency ?? "EUR",
-      enrollment_start_month: String(c.enrollment_start_month ?? 9),
-      enrollment_start_year: String(c.enrollment_start_year ?? baseYearDefault()),
-      enrollment_end_month: String(c.enrollment_end_month ?? 8),
-      enrollment_end_year: String(c.enrollment_end_year ?? baseYearDefault() + 1),
+      enrollment_start_month: c.enrollment_start_month != null ? String(c.enrollment_start_month) : "",
+      enrollment_start_year: c.enrollment_start_year != null ? String(c.enrollment_start_year) : "",
+      enrollment_end_month: c.enrollment_end_month != null ? String(c.enrollment_end_month) : "",
+      enrollment_end_year: c.enrollment_end_year != null ? String(c.enrollment_end_year) : "",
     });
   }
 
@@ -187,10 +188,10 @@ export default function FamilyDetailPage() {
         monthly_tuition: Number(editChildForm.monthly_tuition) || 0,
         currency: editChildForm.currency || "EUR",
         class_name: editChildForm.class_name || null,
-        enrollment_start_month: Number(editChildForm.enrollment_start_month) || 9,
-        enrollment_start_year: Number(editChildForm.enrollment_start_year) || null,
-        enrollment_end_month: Number(editChildForm.enrollment_end_month) || 8,
-        enrollment_end_year: Number(editChildForm.enrollment_end_year) || null,
+        enrollment_start_month: editChildForm.enrollment_start_month ? Number(editChildForm.enrollment_start_month) : null,
+        enrollment_start_year: editChildForm.enrollment_start_year ? Number(editChildForm.enrollment_start_year) : null,
+        enrollment_end_month: editChildForm.enrollment_end_month ? Number(editChildForm.enrollment_end_month) : null,
+        enrollment_end_year: editChildForm.enrollment_end_year ? Number(editChildForm.enrollment_end_year) : null,
       }),
     });
     if (res.ok) {
@@ -428,31 +429,29 @@ export default function FamilyDetailPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment Start</label>
-                  <select
-                    value={`${childForm.enrollment_start_month}:${childForm.enrollment_start_year}`}
-                    onChange={(e) => {
-                      const [m, y] = e.target.value.split(":");
-                      setChildForm((p) => ({ ...p, enrollment_start_month: m, enrollment_start_year: y }));
-                    }}
-                    className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
-                    {monthOptions.map(({ month, year, label }) => (
-                      <option key={`${month}:${year}`} value={`${month}:${year}`}>{label}</option>
-                    ))}
-                  </select>
+                  <HebrewMonthYearPicker
+                    gregMonth={childForm.enrollment_start_month ? Number(childForm.enrollment_start_month) : null}
+                    gregYear={childForm.enrollment_start_year ? Number(childForm.enrollment_start_year) : null}
+                    onChange={(m, y) => setChildForm((p) => ({
+                      ...p,
+                      enrollment_start_month: String(m),
+                      enrollment_start_year: String(y),
+                    }))}
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment End</label>
-                  <select
-                    value={`${childForm.enrollment_end_month}:${childForm.enrollment_end_year}`}
-                    onChange={(e) => {
-                      const [m, y] = e.target.value.split(":");
-                      setChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
-                    }}
-                    className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
-                    {monthOptions.map(({ month, year, label }) => (
-                      <option key={`${month}:${year}`} value={`${month}:${year}`}>{label}</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Enrollment End (optional)</label>
+                  <HebrewMonthYearPicker
+                    gregMonth={childForm.enrollment_end_month ? Number(childForm.enrollment_end_month) : null}
+                    gregYear={childForm.enrollment_end_year ? Number(childForm.enrollment_end_year) : null}
+                    onChange={(m, y) => setChildForm((p) => ({
+                      ...p,
+                      enrollment_end_month: String(m),
+                      enrollment_end_year: String(y),
+                    }))}
+                    allowEmpty
+                    emptyLabel="— (still enrolled)"
+                  />
                 </div>
               </div>
               <button type="submit" disabled={savingChild}
@@ -512,28 +511,28 @@ export default function FamilyDetailPage() {
                       </td>
                       <td className="py-2" dir="rtl">
                         <div className="flex flex-col gap-1">
-                          <select
-                            value={`${editChildForm.enrollment_start_month}:${editChildForm.enrollment_start_year}`}
-                            onChange={(e) => {
-                              const [m, y] = e.target.value.split(":");
-                              setEditChildForm((p) => ({ ...p, enrollment_start_month: m, enrollment_start_year: y }));
-                            }}
-                            className="w-full px-1 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
-                            {monthOptions.map(({ month, year, label }) => (
-                              <option key={`s${month}:${year}`} value={`${month}:${year}`}>{label}</option>
-                            ))}
-                          </select>
-                          <select
-                            value={`${editChildForm.enrollment_end_month}:${editChildForm.enrollment_end_year}`}
-                            onChange={(e) => {
-                              const [m, y] = e.target.value.split(":");
-                              setEditChildForm((p) => ({ ...p, enrollment_end_month: m, enrollment_end_year: y }));
-                            }}
-                            className="w-full px-1 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" dir="rtl">
-                            {monthOptions.map(({ month, year, label }) => (
-                              <option key={`e${month}:${year}`} value={`${month}:${year}`}>{label}</option>
-                            ))}
-                          </select>
+                          <HebrewMonthYearPicker
+                            gregMonth={editChildForm.enrollment_start_month ? Number(editChildForm.enrollment_start_month) : null}
+                            gregYear={editChildForm.enrollment_start_year ? Number(editChildForm.enrollment_start_year) : null}
+                            onChange={(m, y) => setEditChildForm((p) => ({
+                              ...p,
+                              enrollment_start_month: String(m),
+                              enrollment_start_year: String(y),
+                            }))}
+                            className="w-full px-1 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <HebrewMonthYearPicker
+                            gregMonth={editChildForm.enrollment_end_month ? Number(editChildForm.enrollment_end_month) : null}
+                            gregYear={editChildForm.enrollment_end_year ? Number(editChildForm.enrollment_end_year) : null}
+                            onChange={(m, y) => setEditChildForm((p) => ({
+                              ...p,
+                              enrollment_end_month: String(m),
+                              enrollment_end_year: String(y),
+                            }))}
+                            allowEmpty
+                            emptyLabel="— (still enrolled)"
+                            className="w-full px-1 py-0.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
                         </div>
                       </td>
                       <td className="py-2 text-right">
@@ -558,9 +557,13 @@ export default function FamilyDetailPage() {
                       <td className="py-2 text-gray-600">{c.class_name ?? "—"}</td>
                       <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(Number(c.monthly_tuition), (c.currency as Currency) ?? "EUR")}</td>
                       <td className="py-2 text-right text-xs text-gray-500" dir="rtl">
-                        {hebrewMonthLabel(c.enrollment_start_month ?? 9, c.enrollment_start_year ?? baseYear)}
+                        {c.enrollment_start_month != null && c.enrollment_start_year != null
+                          ? hebrewMonthLabel(c.enrollment_start_month, c.enrollment_start_year)
+                          : <span className="text-red-500">— no start —</span>}
                         {" — "}
-                        {hebrewMonthLabel(c.enrollment_end_month ?? 8, c.enrollment_end_year ?? baseYear + 1)}
+                        {c.enrollment_end_month != null && c.enrollment_end_year != null
+                          ? hebrewMonthLabel(c.enrollment_end_month, c.enrollment_end_year)
+                          : <span className="text-gray-400 italic">still enrolled</span>}
                       </td>
                       {canEdit && (
                         <td className="py-2 text-right">
