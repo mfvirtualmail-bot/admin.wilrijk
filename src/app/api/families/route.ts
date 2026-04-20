@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
+
+// Route is auth-guarded with cookies() and computes fresh balances;
+// make sure Next.js never serves a cached response.
+export const dynamic = "force-dynamic";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import {

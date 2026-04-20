@@ -28,7 +28,9 @@ export default function FamiliesPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
-    fetch("/api/families")
+    // cache:'no-store' so browser HTTP cache can't serve a stale balance
+    // after charges are regenerated or a re-snapshot changes totals.
+    fetch("/api/families", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         if (d.error) setError(d.error);
