@@ -11,7 +11,7 @@ import {
   Image,
   pdf,
 } from "@react-pdf/renderer";
-import type { StatementData } from "./statement-data";
+import type { StatementData, StatementMonthRow, PaymentSubline } from "./statement-data";
 import type { EmailSettings, Currency } from "./types";
 import { hebrewMonthLabel } from "./hebrew-date";
 
@@ -46,6 +46,16 @@ function ensureNotoFont() {
 
 const SYM: Record<Currency, string> = { EUR: "€", USD: "$", GBP: "£" };
 
+// Default labels for the four built-in payment method codes. Custom codes
+// render as their raw code — wiring settings.payment_method_labels into
+// the PDF is a follow-up.
+const DEFAULT_METHOD_LABELS: Record<string, string> = {
+  crc: "Crelan",
+  kas: "Cash",
+  bank: "Bank",
+  other: "Other",
+};
+
 function fmt(n: number, currency: Currency = "EUR"): string {
   const sym = SYM[currency] ?? "€";
   return sym + n.toLocaleString("nl-BE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -57,27 +67,42 @@ function formatStatementDateHe(iso: string): string {
   return hebrewMonthLabel(d.getMonth() + 1, d.getFullYear());
 }
 
+function formatGregorian(iso: string): string {
+  const parts = iso.slice(0, 10).split("-");
+  if (parts.length !== 3) return iso;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+function methodWithRef(method: string, ref: string | null): string {
+  const label = DEFAULT_METHOD_LABELS[method] ?? method;
+  return ref ? `${label} ${ref}` : label;
+}
+
 interface Props {
   data: StatementData;
   settings: Pick<EmailSettings, "org_name" | "org_address" | "org_logo_url" | "payment_instructions">;
 }
 
 const LANG = {
-  title: "חשבון פֿאַר שכר לימוד",
+  title: "שכר לימוד איבערזיכט",
   date: "דאַטום פֿון חשבון",
   family: "משפחה",
   contact: "קאָנטאַקט",
   email: "בליץ־פּאָסט",
   phone: "טעלעפֿאָן",
-  ledger: "רעקאָרד",
-  dateCol: "דאַטום",
-  descriptionCol: "באַשרײַבונג",
-  chargeCol: "חיוב",
-  paymentCol: "באַצאָל",
-  balanceCol: "באַלאַנס",
+  periodCol: "שכ\"ל לחודש",
+  descCol: "תלמידים",
+  priceCol: "פרייז",
+  paidCol: "באצאלט",
+  paidDateCol: "דאטום",
+  viaCol: "ע\"י",
+  noteCol: "באמערקונג",
+  residualCol: "נשאר חוב",
   totalCharged: "סך הכל חיוב",
   totalPaid: "סך הכל באַצאָלט",
-  balanceDue: "חוב",
+  balanceDue: "נשאר חוב",
+  credit: "קרעדיט",
+  projected: "(געפּלאַנט)",
   paymentInstructions: "ווי אַזוי צו באצאָלן",
   footer: "אַ דאַנק.",
   empty: "קיין חיובֿ אָדער באַצאָל אויף צו ווײַזן.",
@@ -114,14 +139,20 @@ export function StatementDocument({ data, settings }: Props) {
     metaRow: { flexDirection: rtl ? "row-reverse" : "row", marginBottom: 4 },
     metaLabel: { width: 110, color: "#666", fontSize: 9, textAlign: rtl ? "right" : "left" },
     metaValue: { flex: 1, fontSize: 10, textAlign: rtl ? "right" : "left" },
-    sectionTitle: { fontSize: 12, fontWeight: 700, marginTop: 18, marginBottom: 8, textAlign: rtl ? "right" : "left" },
-    table: { borderWidth: 1, borderColor: "#ccc" },
+    table: { borderWidth: 1, borderColor: "#ccc", marginTop: 6 },
     row: { flexDirection: rtl ? "row-reverse" : "row", borderBottomWidth: 1, borderBottomColor: "#eee" },
     rowHeader: { backgroundColor: "#f3f4f6" },
+    rowCharge: { borderTopWidth: 1, borderTopColor: "#d4d4d4" },
+    rowContinuation: { backgroundColor: "#fcfcfc" },
+    rowProjected: { backgroundColor: "#fef9c3" },
     cell: { padding: 5, fontSize: 9 },
-    cellDate: { width: 85, textAlign: rtl ? "right" : "left" },
-    cellDesc: { flex: 1, textAlign: rtl ? "right" : "left" },
-    cellAmount: { width: 70, textAlign: rtl ? "left" : "right" },
+    cellPeriod: { width: 76, textAlign: rtl ? "right" : "left" },
+    cellDesc: { flex: 1, textAlign: rtl ? "right" : "left", fontSize: 8, color: "#555" },
+    cellAmount: { width: 56, textAlign: rtl ? "left" : "right" },
+    cellDate: { width: 62, textAlign: rtl ? "right" : "left", fontSize: 8 },
+    cellVia: { width: 72, textAlign: rtl ? "right" : "left", fontSize: 8 },
+    cellNote: { width: 60, textAlign: rtl ? "right" : "left", fontSize: 8, color: "#555" },
+    cellResidual: { width: 58, textAlign: rtl ? "left" : "right", fontWeight: 700 },
     totalsBox: { marginTop: 14, padding: 10, backgroundColor: "#f9fafb", borderWidth: 1, borderColor: "#e5e7eb" },
     totalsRow: { flexDirection: rtl ? "row-reverse" : "row", justifyContent: "space-between", marginBottom: 3 },
     totalsLabel: { fontSize: 10, color: "#444", textAlign: rtl ? "right" : "left" },
@@ -185,32 +216,29 @@ export function StatementDocument({ data, settings }: Props) {
           </View>
         ) : null}
 
-        {/* Ledger */}
-        <Text style={styles.sectionTitle}>{lang.ledger}</Text>
-
-        {data.lines.length === 0 ? (
+        {/* Ledger — one logical row per month, with optional payment sublines */}
+        {data.rows.length === 0 ? (
           <Text style={{ ...styles.cell, fontStyle: "italic", color: "#666" }}>{lang.empty}</Text>
         ) : (
           <View style={styles.table}>
             <View style={[styles.row, styles.rowHeader]}>
-              <Text style={[styles.cell, styles.cellDate, { fontWeight: 700 }]}>{lang.dateCol}</Text>
-              <Text style={[styles.cell, styles.cellDesc, { fontWeight: 700 }]}>{lang.descriptionCol}</Text>
-              <Text style={[styles.cell, styles.cellAmount, { fontWeight: 700 }]}>{lang.chargeCol}</Text>
-              <Text style={[styles.cell, styles.cellAmount, { fontWeight: 700 }]}>{lang.paymentCol}</Text>
-              <Text style={[styles.cell, styles.cellAmount, { fontWeight: 700 }]}>{lang.balanceCol}</Text>
+              <Text style={[styles.cell, styles.cellPeriod, { fontWeight: 700 }]}>{lang.periodCol}</Text>
+              <Text style={[styles.cell, styles.cellDesc, { fontWeight: 700 }]}>{lang.descCol}</Text>
+              <Text style={[styles.cell, styles.cellAmount, { fontWeight: 700 }]}>{lang.priceCol}</Text>
+              <Text style={[styles.cell, styles.cellAmount, { fontWeight: 700 }]}>{lang.paidCol}</Text>
+              <Text style={[styles.cell, styles.cellDate, { fontWeight: 700 }]}>{lang.paidDateCol}</Text>
+              <Text style={[styles.cell, styles.cellVia, { fontWeight: 700 }]}>{lang.viaCol}</Text>
+              <Text style={[styles.cell, styles.cellNote, { fontWeight: 700 }]}>{lang.noteCol}</Text>
+              <Text style={[styles.cell, styles.cellResidual, { fontWeight: 700 }]}>{lang.residualCol}</Text>
             </View>
-            {data.lines.map((ln, i) => (
-              <View key={i} style={styles.row}>
-                <Text style={[styles.cell, styles.cellDate]}>{ln.displayDate}</Text>
-                <Text style={[styles.cell, styles.cellDesc]}>{ln.label}</Text>
-                <Text style={[styles.cell, styles.cellAmount]}>
-                  {ln.charge > 0 ? fmt(ln.charge, data.currency) : ""}
-                </Text>
-                <Text style={[styles.cell, styles.cellAmount]}>
-                  {ln.payment > 0 ? fmt(ln.payment, data.currency) : ""}
-                </Text>
-                <Text style={[styles.cell, styles.cellAmount]}>{fmt(ln.balance, data.currency)}</Text>
-              </View>
+            {data.rows.map((r) => (
+              <RowGroup
+                key={`${r.year}-${r.month}`}
+                row={r}
+                styles={styles}
+                currency={data.currency}
+                projectedLabel={lang.projected}
+              />
             ))}
           </View>
         )}
@@ -225,6 +253,12 @@ export function StatementDocument({ data, settings }: Props) {
             <Text style={styles.totalsLabel}>{lang.totalPaid}:</Text>
             <Text style={styles.totalsValue}>{fmt(data.totalPaid, data.currency)}</Text>
           </View>
+          {data.credit > 0 ? (
+            <View style={styles.totalsRow}>
+              <Text style={styles.totalsLabel}>{lang.credit}:</Text>
+              <Text style={styles.totalsValue}>{fmt(data.credit, data.currency)}</Text>
+            </View>
+          ) : null}
           <View style={[styles.totalsRow, styles.balanceDueRow]}>
             <Text style={styles.balanceDueLabel}>{lang.balanceDue}:</Text>
             <Text style={styles.balanceDueValue}>{fmt(data.balanceDue, data.currency)}</Text>
@@ -242,6 +276,73 @@ export function StatementDocument({ data, settings }: Props) {
         <Text style={styles.footer}>{lang.footer}</Text>
       </Page>
     </Document>
+  );
+}
+
+// Rendered one per StatementMonthRow: the charge row itself, plus one
+// additional "continuation" row per extra payment subline so multi-
+// payment months fan out vertically the way Bais Rachel ledgers do.
+function RowGroup({
+  row, styles, currency, projectedLabel,
+}: {
+  row: StatementMonthRow;
+  styles: ReturnType<typeof StyleSheet.create>;
+  currency: Currency;
+  projectedLabel: string;
+}) {
+  const breakdown = row.children.length > 1
+    ? row.children.map((c) => `${c.name} ${fmt(c.amount, currency)}`).join("  +  ")
+    : row.children.map((c) => c.name).join(", ");
+
+  const firstPay = row.paymentsApplied[0];
+  const restPays = row.paymentsApplied.slice(1);
+  const projected = row.kind === "projected";
+
+  const chargeRowStyle = projected
+    ? [styles.row, styles.rowCharge, styles.rowProjected]
+    : [styles.row, styles.rowCharge];
+
+  const continuationRowStyle = projected
+    ? [styles.row, styles.rowContinuation, styles.rowProjected]
+    : [styles.row, styles.rowContinuation];
+
+  return (
+    <>
+      <View style={chargeRowStyle}>
+        <Text style={[styles.cell, styles.cellPeriod, { fontWeight: 700 }]}>
+          {row.periodLabel}{projected ? ` ${projectedLabel}` : ""}
+        </Text>
+        <Text style={[styles.cell, styles.cellDesc]}>{breakdown}</Text>
+        <Text style={[styles.cell, styles.cellAmount]}>{fmt(row.totalCharge, currency)}</Text>
+        <Text style={[styles.cell, styles.cellAmount]}>
+          {firstPay ? fmt(firstPay.amount, currency) : ""}
+        </Text>
+        <Text style={[styles.cell, styles.cellDate]}>
+          {firstPay ? formatGregorian(firstPay.paymentDate) : ""}
+        </Text>
+        <Text style={[styles.cell, styles.cellVia]}>
+          {firstPay ? methodWithRef(firstPay.method, firstPay.reference) : ""}
+        </Text>
+        <Text style={[styles.cell, styles.cellNote]}>
+          {firstPay?.fxNote ?? ""}
+        </Text>
+        <Text style={[styles.cell, styles.cellResidual]}>
+          {row.residual > 0 ? fmt(-row.residual, currency) : fmt(0, currency)}
+        </Text>
+      </View>
+      {restPays.map((p: PaymentSubline, i: number) => (
+        <View key={`${p.paymentId}-${i}`} style={continuationRowStyle}>
+          <Text style={[styles.cell, styles.cellPeriod]}></Text>
+          <Text style={[styles.cell, styles.cellDesc]}></Text>
+          <Text style={[styles.cell, styles.cellAmount]}></Text>
+          <Text style={[styles.cell, styles.cellAmount]}>{fmt(p.amount, currency)}</Text>
+          <Text style={[styles.cell, styles.cellDate]}>{formatGregorian(p.paymentDate)}</Text>
+          <Text style={[styles.cell, styles.cellVia]}>{methodWithRef(p.method, p.reference)}</Text>
+          <Text style={[styles.cell, styles.cellNote]}>{p.fxNote ?? ""}</Text>
+          <Text style={[styles.cell, styles.cellResidual]}></Text>
+        </View>
+      ))}
+    </>
   );
 }
 
