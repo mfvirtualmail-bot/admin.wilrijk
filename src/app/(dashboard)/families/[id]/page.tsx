@@ -296,6 +296,15 @@ export default function FamilyDetailPage() {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold text-gray-900">{familyDisplayName(family.name, family.father_name)}</h2>
             <div className="flex gap-3 items-center">
+              <a
+                href={`/api/email/pdf?familyId=${family.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-blue-700 hover:underline"
+                title="View the PDF statement that is sent to the parent"
+              >
+                👁 View statement
+              </a>
               {family.email && (
                 <Link
                   href={`/emails?preview=${family.id}`}

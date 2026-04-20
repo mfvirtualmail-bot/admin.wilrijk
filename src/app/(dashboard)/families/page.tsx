@@ -137,7 +137,7 @@ export default function FamiliesPage() {
     }
   }
 
-  const colCount = canDelete ? 9 : 7;
+  const colCount = canDelete ? 9 : 8;
 
   return (
     <div>
@@ -225,9 +225,7 @@ export default function FamiliesPage() {
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Email</th>
                   <th className="text-right px-4 py-3 font-semibold text-gray-600">Open Balance</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Status</th>
-                  {canDelete && (
-                    <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
-                  )}
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -271,8 +269,17 @@ export default function FamiliesPage() {
                         {f.is_active ? "Active" : "Inactive"}
                       </span>
                     </td>
-                    {canDelete && (
-                      <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right space-x-3 whitespace-nowrap">
+                      <a
+                        href={`/api/email/pdf?familyId=${f.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                        title="View the PDF statement that is sent to the parent"
+                      >
+                        View
+                      </a>
+                      {canDelete && (
                         <button
                           onClick={() => handleDelete(f.id, f.name)}
                           disabled={deleting === f.id || bulkDeleting}
@@ -280,8 +287,8 @@ export default function FamiliesPage() {
                         >
                           {deleting === f.id ? "…" : "Delete"}
                         </button>
-                      </td>
-                    )}
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
