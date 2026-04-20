@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { generateChargesForChild, getCurrentBaseYear } from "@/lib/charge-utils";
+import { generateChargesForChild } from "@/lib/charge-utils";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -36,8 +36,12 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ charges: data });
 }
 
-// POST /api/charges/generate — Generate charges for children
-// Body: { family_id?, child_id?, academic_year? }
+// POST /api/charges — Generate missing charges for active students.
+// Body: { family_id?, child_id? }  (optional filters)
+//
+// Uses the current enrollment window on each student: charges are
+// generated from enrollment_start up to min(enrollment_end, today).
+// Idempotent — existing (child_id, month, year) rows are preserved.
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -45,8 +49,7 @@ export async function POST(req: NextRequest) {
   if (!user.is_super_admin && !perms["charges"]?.includes("add"))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const body = await req.json();
-  const baseYear = body.academic_year ?? getCurrentBaseYear();
+  const body = await req.json().catch(() => ({}));
   const db = createServerClient();
 
   // Load children to generate charges for
@@ -74,7 +77,6 @@ export async function POST(req: NextRequest) {
       child.enrollment_start_year,
       child.enrollment_end_month,
       child.enrollment_end_year,
-      baseYear
     );
     totalCreated += created;
   }

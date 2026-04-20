@@ -20,36 +20,62 @@ export function familyMatchKey(name: string, fatherName?: string | null): string
 }
 
 /**
- * Given enrollment period fields (or nulls for defaults), return the list of {month, year}
- * the child is enrolled for within the given academic year.
- * Academic year runs Sep (baseYear) → Aug (baseYear+1).
+ * Months for which a student should be billed right now:
+ *   - starts at (enrollment_start_month, enrollment_start_year) — required.
+ *     If either is null, returns [] (no charges — admin needs to fill in
+ *     a start before this student can be billed).
+ *   - ends at min(enrollment_end, today). If enrollment_end is null we
+ *     bill through the current calendar month. Never pre-bills future
+ *     months, even if enrollment_end is in the future.
+ *
+ * The list walks month-by-month, ignoring academic-year boundaries, so a
+ * student enrolled across multiple years gets charges for every month
+ * in their window.
  */
 export function getEnrollmentMonths(
   startMonth: number | null | undefined,
   startYear: number | null | undefined,
   endMonth: number | null | undefined,
   endYear: number | null | undefined,
-  baseYear: number
+  today: Date = new Date(),
 ): { month: number; year: number }[] {
-  const sm = startMonth ?? 9;
-  const sy = startYear ?? baseYear;
-  const em = endMonth ?? 8;
-  const ey = endYear ?? baseYear + 1;
+  if (startMonth == null || startYear == null) return [];
 
-  // Build full academic year month list, then filter to enrollment window
-  const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
-  const result: { month: number; year: number }[] = [];
+  const todayMonth = today.getMonth() + 1;
+  const todayYear = today.getFullYear();
+  const todayKey = todayYear * 12 + todayMonth;
 
-  for (const m of ACADEMIC_MONTHS) {
-    const y = m >= 9 ? baseYear : baseYear + 1;
-    // Check if this month is within the enrollment period
-    const monthKey = y * 100 + m;
-    const startKey = sy * 100 + sm;
-    const endKey = ey * 100 + em;
-    if (monthKey >= startKey && monthKey <= endKey) {
-      result.push({ month: m, year: y });
+  // Effective end: the EARLIER of enrollment_end and today.
+  let em: number;
+  let ey: number;
+  if (endMonth != null && endYear != null) {
+    const enrollEndKey = endYear * 12 + endMonth;
+    if (enrollEndKey <= todayKey) {
+      em = endMonth;
+      ey = endYear;
+    } else {
+      em = todayMonth;
+      ey = todayYear;
     }
+  } else {
+    em = todayMonth;
+    ey = todayYear;
   }
 
+  const startKey = startYear * 12 + startMonth;
+  const endKey = ey * 12 + em;
+  if (endKey < startKey) return [];
+
+  const result: { month: number; year: number }[] = [];
+  let m = startMonth;
+  let y = startYear;
+  while (y * 12 + m <= endKey) {
+    result.push({ month: m, year: y });
+    m++;
+    if (m > 12) {
+      m = 1;
+      y++;
+    }
+  }
   return result;
 }

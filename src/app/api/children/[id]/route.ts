@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { regenerateChargesForChild, getCurrentBaseYear } from "@/lib/charge-utils";
+import { regenerateChargesForChild } from "@/lib/charge-utils";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -34,17 +34,21 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Auto-regenerate charges if tuition or enrollment period changed
+  // Auto-regenerate charges (destructive — wipes this child's existing
+  // charges and rebuilds from start → min(end, today)) when tuition or
+  // enrollment dates move. Any charges the student shouldn't have
+  // (e.g. from a previously too-wide enrollment window) are cleaned up.
   if (data && tuitionOrEnrollmentChanged) {
     try {
       const childCurrency = data.currency ?? "EUR";
-      const baseYear = getCurrentBaseYear();
       await regenerateChargesForChild(
         db, data.id, data.family_id, Number(data.monthly_tuition), childCurrency,
         data.enrollment_start_month, data.enrollment_start_year,
-        data.enrollment_end_month, data.enrollment_end_year, baseYear
+        data.enrollment_end_month, data.enrollment_end_year,
       );
-    } catch { /* charge regeneration is best-effort */ }
+    } catch (e) {
+      console.error("[children PUT] charge regeneration failed:", (e as Error).message);
+    }
   }
 
   return NextResponse.json({ child: data });
