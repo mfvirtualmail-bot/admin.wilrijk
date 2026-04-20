@@ -90,8 +90,8 @@ const LANG = {
   contact: "קאָנטאַקט",
   email: "בליץ־פּאָסט",
   phone: "טעלעפֿאָן",
+  students: "תלמידים",
   periodCol: "שכ\"ל לחודש",
-  descCol: "תלמידים",
   priceCol: "פרייז",
   paidCol: "באצאלט",
   paidDateCol: "דאטום",
@@ -146,13 +146,12 @@ export function StatementDocument({ data, settings }: Props) {
     rowContinuation: { backgroundColor: "#fcfcfc" },
     rowProjected: { backgroundColor: "#fef9c3" },
     cell: { padding: 5, fontSize: 9 },
-    cellPeriod: { width: 76, textAlign: rtl ? "right" : "left" },
-    cellDesc: { flex: 1, textAlign: rtl ? "right" : "left", fontSize: 8, color: "#555" },
-    cellAmount: { width: 56, textAlign: rtl ? "left" : "right" },
-    cellDate: { width: 62, textAlign: rtl ? "right" : "left", fontSize: 8 },
-    cellVia: { width: 72, textAlign: rtl ? "right" : "left", fontSize: 8 },
-    cellNote: { width: 60, textAlign: rtl ? "right" : "left", fontSize: 8, color: "#555" },
-    cellResidual: { width: 58, textAlign: rtl ? "left" : "right", fontWeight: 700 },
+    cellPeriod: { width: 90, textAlign: rtl ? "right" : "left" },
+    cellAmount: { width: 70, textAlign: rtl ? "left" : "right" },
+    cellDate: { width: 70, textAlign: rtl ? "right" : "left", fontSize: 8 },
+    cellVia: { width: 80, textAlign: rtl ? "right" : "left", fontSize: 8 },
+    cellNote: { flex: 1, textAlign: rtl ? "right" : "left", fontSize: 8, color: "#555" },
+    cellResidual: { width: 70, textAlign: rtl ? "left" : "right", fontWeight: 700 },
     totalsBox: { marginTop: 14, padding: 10, backgroundColor: "#f9fafb", borderWidth: 1, borderColor: "#e5e7eb" },
     totalsRow: { flexDirection: rtl ? "row-reverse" : "row", justifyContent: "space-between", marginBottom: 3 },
     totalsLabel: { fontSize: 10, color: "#444", textAlign: rtl ? "right" : "left" },
@@ -168,6 +167,9 @@ export function StatementDocument({ data, settings }: Props) {
 
   const familyName = data.family.hebrew_name || data.family.name;
   const contactParts = [data.family.father_name, data.family.mother_name].filter(Boolean);
+  const studentNames = data.children
+    .map((c) => c.hebrew_name || [c.first_name, c.last_name].filter(Boolean).join(" "))
+    .filter(Boolean);
 
   return (
     <Document>
@@ -215,6 +217,12 @@ export function StatementDocument({ data, settings }: Props) {
             <Text style={styles.metaValue}>{data.family.phone}</Text>
           </View>
         ) : null}
+        {studentNames.length > 0 ? (
+          <View style={styles.metaRow}>
+            <Text style={styles.metaLabel}>{lang.students}:</Text>
+            <Text style={styles.metaValue}>{studentNames.join(" · ")}</Text>
+          </View>
+        ) : null}
 
         {/* Ledger — one logical row per month, with optional payment sublines */}
         {data.rows.length === 0 ? (
@@ -223,7 +231,6 @@ export function StatementDocument({ data, settings }: Props) {
           <View style={styles.table}>
             <View style={[styles.row, styles.rowHeader]}>
               <Text style={[styles.cell, styles.cellPeriod, { fontWeight: 700 }]}>{lang.periodCol}</Text>
-              <Text style={[styles.cell, styles.cellDesc, { fontWeight: 700 }]}>{lang.descCol}</Text>
               <Text style={[styles.cell, styles.cellAmount, { fontWeight: 700 }]}>{lang.priceCol}</Text>
               <Text style={[styles.cell, styles.cellAmount, { fontWeight: 700 }]}>{lang.paidCol}</Text>
               <Text style={[styles.cell, styles.cellDate, { fontWeight: 700 }]}>{lang.paidDateCol}</Text>
@@ -290,10 +297,6 @@ function RowGroup({
   currency: Currency;
   projectedLabel: string;
 }) {
-  const breakdown = row.children.length > 1
-    ? row.children.map((c) => `${c.name} ${fmt(c.amount, currency)}`).join("  +  ")
-    : row.children.map((c) => c.name).join(", ");
-
   const firstPay = row.paymentsApplied[0];
   const restPays = row.paymentsApplied.slice(1);
   const projected = row.kind === "projected";
@@ -312,7 +315,6 @@ function RowGroup({
         <Text style={[styles.cell, styles.cellPeriod, { fontWeight: 700 }]}>
           {row.periodLabel}{projected ? ` ${projectedLabel}` : ""}
         </Text>
-        <Text style={[styles.cell, styles.cellDesc]}>{breakdown}</Text>
         <Text style={[styles.cell, styles.cellAmount]}>{fmt(row.totalCharge, currency)}</Text>
         <Text style={[styles.cell, styles.cellAmount]}>
           {firstPay ? fmt(firstPay.amount, currency) : ""}
@@ -333,7 +335,6 @@ function RowGroup({
       {restPays.map((p: PaymentSubline, i: number) => (
         <View key={`${p.paymentId}-${i}`} style={continuationRowStyle}>
           <Text style={[styles.cell, styles.cellPeriod]}></Text>
-          <Text style={[styles.cell, styles.cellDesc]}></Text>
           <Text style={[styles.cell, styles.cellAmount]}></Text>
           <Text style={[styles.cell, styles.cellAmount]}>{fmt(p.amount, currency)}</Text>
           <Text style={[styles.cell, styles.cellDate]}>{formatGregorian(p.paymentDate)}</Text>
