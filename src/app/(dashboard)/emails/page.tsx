@@ -9,7 +9,6 @@ import type { Family, Currency } from "@/lib/types";
 
 interface FamilyWithBalance extends Family {
   balance?: number;
-  currency?: Currency;
 }
 
 interface Preview {

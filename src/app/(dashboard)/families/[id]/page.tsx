@@ -325,6 +325,7 @@ export default function FamilyDetailPage() {
                 ["Phone", family.phone], ["Email", family.email],
                 ["Address", family.address], ["City", `${family.city ?? ""} ${family.postal_code ?? ""}`.trim()],
                 ["Email language", family.language === "yi" ? "Yiddish" : "English"],
+                ["Statement currency", `${CURRENCY_SYMBOLS[family.currency ?? "EUR"]} ${family.currency ?? "EUR"}`],
                 ["Notes", family.notes],
               ].map(([label, val]) => val ? (
                 <div key={label as string}><span className="text-gray-500">{label}:</span> <span className="text-gray-900">{val}</span></div>
@@ -348,16 +349,31 @@ export default function FamilyDetailPage() {
                   </div>
                 ))}
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Email language</label>
-                <select
-                  value={(form.language as string) ?? "en"}
-                  onChange={(e) => setForm((p) => ({ ...p, language: e.target.value as "en" | "yi" }))}
-                  className="w-60 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="en">English</option>
-                  <option value="yi">ייִדיש (Yiddish)</option>
-                </select>
+              <div className="flex gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Email language</label>
+                  <select
+                    value={(form.language as string) ?? "en"}
+                    onChange={(e) => setForm((p) => ({ ...p, language: e.target.value as "en" | "yi" }))}
+                    className="w-60 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="en">English</option>
+                    <option value="yi">ייִדיש (Yiddish)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Statement currency</label>
+                  <select
+                    value={(form.currency as string) ?? "EUR"}
+                    onChange={(e) => setForm((p) => ({ ...p, currency: e.target.value as Currency }))}
+                    className="w-40 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    title="All charges and the balance on this family's statement are displayed in this currency. Payments in another currency are converted automatically."
+                  >
+                    <option value="EUR">€ EUR</option>
+                    <option value="USD">$ USD</option>
+                    <option value="GBP">£ GBP</option>
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>

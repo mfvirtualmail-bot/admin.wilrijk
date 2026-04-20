@@ -86,10 +86,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { name, father_name, mother_name, address, city, postal_code, phone, email, notes, language } = body;
+  const { name, father_name, mother_name, address, city, postal_code, phone, email, notes, language, currency } = body;
   if (!name?.trim()) return NextResponse.json({ error: "Name is required" }, { status: 400 });
 
   const validLang = language === "yi" || language === "en" ? language : "en";
+  const validCurrency: Currency =
+    currency === "USD" || currency === "GBP" || currency === "EUR" ? currency : "EUR";
 
   const db = createServerClient();
   const { data, error } = await db
@@ -105,6 +107,7 @@ export async function POST(req: NextRequest) {
       email,
       notes,
       language: validLang,
+      currency: validCurrency,
     })
     .select()
     .single();

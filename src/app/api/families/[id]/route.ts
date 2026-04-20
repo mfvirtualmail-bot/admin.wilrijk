@@ -83,6 +83,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
+  if (body.currency != null && !(body.currency === "EUR" || body.currency === "USD" || body.currency === "GBP")) {
+    return NextResponse.json({ error: "Invalid currency" }, { status: 400 });
+  }
   const db = createServerClient();
   const { data, error } = await db
     .from("families")
