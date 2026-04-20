@@ -4,7 +4,10 @@ import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
 import { buildFamilyStatement } from "@/lib/statement-data";
-import type { Currency } from "@/lib/types";
+import { loadTablesForCurrencies } from "@/lib/fx";
+import type { Currency, Family, Child, Charge, Payment } from "@/lib/types";
+
+export const maxDuration = 300;
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -44,29 +47,84 @@ export async function GET() {
   const academicYear = getAcademicYear();
   const months = ACADEMIC_MONTHS.map((m) => monthYear(academicYear, m.month));
 
-  const familiesRes = await db
-    .from("families")
-    .select("id, name, father_name")
-    .eq("is_active", true)
-    .order("name");
+  // Bulk-load ALL data in a handful of queries — one FIFO pass per
+  // family runs in memory after this. The per-family-query version
+  // timed out Vercel's serverless budget.
+  const [familiesRes, childrenRes, chargesRes, paymentsRes] = await Promise.all([
+    db.from("families").select("*").eq("is_active", true).order("name"),
+    db.from("children").select("*"),
+    db.from("charges").select("*"),
+    db.from("payments").select("*"),
+  ]);
 
-  if (familiesRes.error) {
-    return NextResponse.json({ error: familiesRes.error.message }, { status: 500 });
+  if (familiesRes.error) return NextResponse.json({ error: familiesRes.error.message }, { status: 500 });
+
+  const families = (familiesRes.data ?? []) as Family[];
+  const allChildren = (childrenRes.data ?? []) as Child[];
+  const allCharges = (chargesRes.data ?? []) as Charge[];
+  const allPayments = (paymentsRes.data ?? []) as Payment[];
+
+  // Shared FX table, built once from every currency referenced anywhere.
+  const ccySet = new Set<Currency>();
+  ccySet.add("EUR");
+  for (const f of families) {
+    const c = (f.currency ?? "EUR") as Currency;
+    if (c === "EUR" || c === "USD" || c === "GBP") ccySet.add(c);
   }
-  const families = familiesRes.data ?? [];
+  for (const c of allChildren) {
+    const cur = (c.currency ?? "EUR") as Currency;
+    if (cur === "EUR" || cur === "USD" || cur === "GBP") ccySet.add(cur);
+  }
+  for (const c of allCharges) {
+    const cur = (c.currency ?? "EUR") as Currency;
+    if (cur === "EUR" || cur === "USD" || cur === "GBP") ccySet.add(cur);
+  }
+  for (const p of allPayments) {
+    const cur = (p.currency ?? "EUR") as Currency;
+    if (cur === "EUR" || cur === "USD" || cur === "GBP") ccySet.add(cur);
+  }
+  const fxTables = await loadTablesForCurrencies(db, ccySet);
 
-  // Build a full FIFO statement per family so cells match what the
-  // statement PDF fills in. This mirrors the allocator used by
-  // /api/statements, so paid months appear across the spreadsheet in
-  // the same order payments landed — even when a payment has no
-  // month/year hint, and even when one payment spans multiple months.
+  // Index everything by family once so each FIFO pass gets O(1) lookups.
+  const childrenByFamily = new Map<string, Child[]>();
+  for (const c of allChildren) {
+    const bucket = childrenByFamily.get(c.family_id) ?? [];
+    bucket.push(c);
+    childrenByFamily.set(c.family_id, bucket);
+  }
+  const chargesByFamily = new Map<string, Charge[]>();
+  for (const c of allCharges) {
+    const bucket = chargesByFamily.get(c.family_id) ?? [];
+    bucket.push(c);
+    chargesByFamily.set(c.family_id, bucket);
+  }
+  const paymentsByFamily = new Map<string, Payment[]>();
+  for (const p of allPayments) {
+    const bucket = paymentsByFamily.get(p.family_id) ?? [];
+    bucket.push(p);
+    paymentsByFamily.set(p.family_id, bucket);
+  }
+
   const statements = await Promise.all(
-    families.map((f) => buildFamilyStatement(db, f.id))
+    families.map(async (family) => {
+      try {
+        return await buildFamilyStatement(db, family.id, new Date(), {
+          family,
+          children: childrenByFamily.get(family.id) ?? [],
+          charges: chargesByFamily.get(family.id) ?? [],
+          payments: paymentsByFamily.get(family.id) ?? [],
+          fxTables,
+        });
+      } catch (e) {
+        console.error(`spreadsheet: buildFamilyStatement failed for ${family.id}`, e);
+        return null;
+      }
+    })
   );
 
   const rows = families.map((family, i) => {
     const stmt = statements[i];
-    const base: Currency = (stmt?.currency ?? "EUR") as Currency;
+    const base: Currency = (stmt?.currency ?? (family.currency ?? "EUR")) as Currency;
 
     const monthData: Record<string, {
       paymentId: string | null;
@@ -92,10 +150,8 @@ export async function GET() {
       totalPaid = stmt.totalPaid;
       balance = stmt.balanceDue;
 
-      // Approximate "monthly tuition" for cell-colour comparison: take
-      // the most common totalCharge across real charge rows, or the
-      // last row's total if we only have one. Used only for the
-      // paid/partial/unpaid traffic-light background.
+      // Traffic-light threshold per cell: use the most recent real
+      // charge row's totalCharge as the reference "monthly" amount.
       const realTotals = stmt.rows
         .filter((r) => r.kind === "charge" && r.totalCharge > 0)
         .map((r) => r.totalCharge);
@@ -103,10 +159,7 @@ export async function GET() {
         monthlyTuition = realTotals[realTotals.length - 1];
       }
 
-      // Fill each academic-year cell with the sum of FIFO fragments
-      // that landed on that Gregorian (month, year). Multiple
-      // fragments merge into one cell; a summary note reports how
-      // many payments contributed.
+      // Sum every FIFO fragment that landed on each academic-year slot.
       for (const row of stmt.rows) {
         const monthKey = `m_${row.month}_${row.year}`;
         if (!(monthKey in monthData)) continue;

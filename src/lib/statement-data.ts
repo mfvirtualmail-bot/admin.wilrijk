@@ -108,24 +108,46 @@ interface PaymentInCcy {
   fxNote: string | null;
 }
 
+export interface PreloadedFamilyData {
+  family: Family;
+  children: Child[];
+  charges: Charge[];
+  payments: Payment[];
+  /** Optional: reuse a shared FX table across many families to avoid
+   *  re-querying exchange_rates per family. */
+  fxTables?: Awaited<ReturnType<typeof loadTablesForCurrencies>>;
+}
+
 export async function buildFamilyStatement(
   db: SupabaseClient,
   familyId: string,
   statementDate: Date = new Date(),
+  preloaded?: PreloadedFamilyData,
 ): Promise<StatementData | null> {
-  const [familyRes, childrenRes, chargesRes, paymentsRes] = await Promise.all([
-    db.from("families").select("*").eq("id", familyId).single(),
-    db.from("children").select("*").eq("family_id", familyId),
-    db.from("charges").select("*").eq("family_id", familyId),
-    db.from("payments").select("*").eq("family_id", familyId),
-  ]);
+  let family: Family;
+  let children: Child[];
+  let charges: Charge[];
+  let payments: Payment[];
 
-  if (familyRes.error || !familyRes.data) return null;
+  if (preloaded) {
+    family = preloaded.family;
+    children = preloaded.children;
+    charges = preloaded.charges;
+    payments = preloaded.payments;
+  } else {
+    const [familyRes, childrenRes, chargesRes, paymentsRes] = await Promise.all([
+      db.from("families").select("*").eq("id", familyId).single(),
+      db.from("children").select("*").eq("family_id", familyId),
+      db.from("charges").select("*").eq("family_id", familyId),
+      db.from("payments").select("*").eq("family_id", familyId),
+    ]);
+    if (familyRes.error || !familyRes.data) return null;
+    family = familyRes.data as Family;
+    children = (childrenRes.data ?? []) as Child[];
+    charges = (chargesRes.data ?? []) as Charge[];
+    payments = (paymentsRes.data ?? []) as Payment[];
+  }
 
-  const family = familyRes.data as Family;
-  const children = (childrenRes.data ?? []) as Child[];
-  const charges = (chargesRes.data ?? []) as Charge[];
-  const payments = (paymentsRes.data ?? []) as Payment[];
   const familyCurrency: Currency = (family.currency ?? "EUR") as Currency;
 
   const now = new Date(statementDate);
@@ -181,7 +203,7 @@ export async function buildFamilyStatement(
     const pc = (p.currency ?? "EUR") as Currency;
     if (pc === "EUR" || pc === "USD" || pc === "GBP") ccySet.add(pc);
   }
-  const tables = await loadTablesForCurrencies(db, ccySet);
+  const tables = preloaded?.fxTables ?? (await loadTablesForCurrencies(db, ccySet));
 
   // Fill missing eur_amount snapshots for all rows (in-memory only).
   const chargeRowsAll = charges as unknown as (Charge & ChargeEurRow)[];
