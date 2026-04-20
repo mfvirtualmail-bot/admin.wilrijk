@@ -1,3 +1,5 @@
+import { HDate } from "@hebcal/core";
+
 /**
  * Hebrew calendar utilities for Admin Wilrijk
  *
@@ -122,6 +124,68 @@ export function hebrewMonthLabel(gregorianMonth: number, gregorianYear: number):
   const monthName = HEBREW_MONTH_NAMES[idx];
   const hebrewYear = getHebrewYear(gregorianYear, gregorianMonth);
   return `${monthName} ${hebrewYearToLetters(hebrewYear)}`;
+}
+
+/**
+ * One Rosh Chodesh entry, as consumed by the charge generator + cron.
+ *  - `gregDate` is the Gregorian date of day 1 of this Hebrew month.
+ *  - `hebrewMonth` is the hebcal numbering: 1=Nisan..6=Elul, 7=Tishrei..
+ *    12=Adar (or Adar I in leap years), 13=Adar II (leap years only).
+ *  - `hebrewYear` is the full Hebrew year number (e.g. 5786).
+ */
+export interface RoshChodeshEntry {
+  gregDate: Date;
+  hebrewMonth: number;
+  hebrewYear: number;
+}
+
+/**
+ * Step to the next Hebrew month in chronological (not numerical) order.
+ * Hebrew year starts at Tishrei (7), runs 7,8,9,10,11,12,(13 if leap),1,
+ * 2,3,4,5,6, then Tishrei of the next year. The "year rollover" happens
+ * after Elul (6), not after Adar/Adar II.
+ */
+function nextHebrewMonth(hebrewMonth: number, hebrewYear: number): { hebrewMonth: number; hebrewYear: number } {
+  if (hebrewMonth === 6) return { hebrewMonth: 7, hebrewYear: hebrewYear + 1 };
+  const monthsThisYear = HDate.monthsInYear(hebrewYear);
+  if (hebrewMonth === monthsThisYear) return { hebrewMonth: 1, hebrewYear };
+  return { hebrewMonth: hebrewMonth + 1, hebrewYear };
+}
+
+/**
+ * Enumerate every Rosh Chodesh (first of each Hebrew month) whose Gregorian
+ * date falls within [startDate, endDate] inclusive. Returns entries in
+ * chronological order.
+ *
+ * Used by the charge generator: each Rosh Chodesh produces exactly one
+ * charge row. In leap Hebrew years this naturally yields 13 charges per
+ * full year; non-leap years yield 12. Also handles the rare case where
+ * two Rosh Chodesh fall in the same Gregorian month (they get distinct
+ * (hebrew_month, hebrew_year) keys, so no collision).
+ */
+export function enumerateRoshChodesh(startDate: Date, endDate: Date): RoshChodeshEntry[] {
+  if (endDate < startDate) return [];
+
+  // Find the Rosh Chodesh of the Hebrew month containing startDate — day 1
+  // of that HDate's month. If it's strictly before startDate, advance one
+  // Hebrew month.
+  const startHd = new HDate(startDate);
+  let hm = startHd.getMonth();
+  let hy = startHd.getFullYear();
+  let rcGreg = new HDate(1, hm, hy).greg();
+  if (rcGreg < startDate) {
+    ({ hebrewMonth: hm, hebrewYear: hy } = nextHebrewMonth(hm, hy));
+    rcGreg = new HDate(1, hm, hy).greg();
+  }
+
+  const result: RoshChodeshEntry[] = [];
+  // Safety cap: one student shouldn't span more than ~30 years of billing.
+  for (let i = 0; i < 500 && rcGreg <= endDate; i++) {
+    result.push({ gregDate: rcGreg, hebrewMonth: hm, hebrewYear: hy });
+    ({ hebrewMonth: hm, hebrewYear: hy } = nextHebrewMonth(hm, hy));
+    rcGreg = new HDate(1, hm, hy).greg();
+  }
+  return result;
 }
 
 /**
