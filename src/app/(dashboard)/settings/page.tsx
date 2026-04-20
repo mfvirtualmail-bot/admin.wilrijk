@@ -696,6 +696,10 @@ function SnapshotStatusPanel() {
   const [fetchingEcb, setFetchingEcb] = useState(false);
   const [fetchingHistory, setFetchingHistory] = useState(false);
   const [resnapshotting, setResnapshotting] = useState(false);
+  const [pruning, setPruning] = useState(false);
+  const [preCharging, setPreCharging] = useState(false);
+  const [backfillingHebrew, setBackfillingHebrew] = useState(false);
+  const [nextHebrewMonth, setNextHebrewMonth] = useState<{ name: string; year: number } | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -715,6 +719,68 @@ function SnapshotStatusPanel() {
   }
 
   useEffect(() => { load(); }, []);
+
+  // Load the name of the next Hebrew month so the Pre-charge button can
+  // label itself (e.g. "Pre-charge Iyyar 5786") instead of showing a
+  // generic label.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/charges/pre-charge-next-month");
+        if (!r.ok) return;
+        const d = await r.json();
+        setNextHebrewMonth({ name: d.hebrewMonth, year: d.hebrewYear });
+      } catch {
+        // Non-fatal — button will just show a generic label.
+      }
+    })();
+  }, []);
+
+  // --- Pre-charge the next Hebrew month. Operators use this to send
+  //     statements a few days before the month starts. The daily Rosh
+  //     Chodesh cron (/api/charges/cron) won't double-charge because
+  //     both paths upsert on (child_id, hebrew_month, hebrew_year).
+  async function handlePreChargeNextMonth() {
+    const target = nextHebrewMonth ? ` ${nextHebrewMonth.name} ${nextHebrewMonth.year}` : "";
+    if (!confirm(`Pre-charge${target} for every active student now? Safe to re-run — already-billed Hebrew months stay as they are.`)) return;
+    setPreCharging(true);
+    setErr(null);
+    setProgress("Pre-charging next Hebrew month…");
+    try {
+      const res = await fetch("/api/charges/pre-charge-next-month", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Pre-charge failed");
+      setProgress(`Pre-charged ${d.hebrewMonth} ${d.hebrewYear} — created ${d.created} charge(s).`);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPreCharging(false);
+      load();
+    }
+  }
+
+  // --- Backfill Hebrew month columns on legacy charge rows. Run once
+  //     after applying migration 006. Idempotent — subsequent runs find
+  //     no NULL rows and do nothing.
+  async function handleBackfillHebrew() {
+    if (!confirm("Backfill Hebrew month / year on every existing charge row? Safe to re-run — only touches rows that are still NULL.")) return;
+    setBackfillingHebrew(true);
+    setErr(null);
+    setProgress("Backfilling Hebrew month columns…");
+    try {
+      const res = await fetch("/api/charges/backfill-hebrew", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Backfill failed");
+      const parts = [`Scanned ${d.scanned}, updated ${d.updated}`];
+      if ((d.failures as unknown[]).length > 0) parts.push(`${(d.failures as unknown[]).length} failed`);
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBackfillingHebrew(false);
+      load();
+    }
+  }
 
   // --- 1. Fetch ECB rates now. Surfaces any error so the operator can
   //        see whether ECB is actually reachable from the server.
@@ -739,6 +805,38 @@ function SnapshotStatusPanel() {
       setErr((e as Error).message);
     } finally {
       setFetchingEcb(false);
+      load();
+    }
+  }
+
+  // --- 1a'. Prune old ECB rates (keep last N years). Supabase/PostgREST
+  //          has a 1000-row default SELECT limit; a table with 27 years
+  //          of daily rates quietly breaks rate lookup when a regression
+  //          in pagination code forgets to paginate. Keeping the table
+  //          small makes that failure mode impossible to hit.
+  async function handlePrune() {
+    if (!confirm(
+      "Delete ECB exchange_rates rows older than 2 years? Older rates aren't needed " +
+      "because no payment or charge in the system goes back that far. Safe and reversible: " +
+      "click Fetch full history any time to repopulate.",
+    )) return;
+    setPruning(true);
+    setErr(null);
+    setProgress("Pruning old rates…");
+    try {
+      const res = await fetch("/api/fx/prune-old-rates?years=2", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Prune failed");
+      const parts = [`Deleted ${d.totalDeleted} row(s) older than ${d.cutoffDate}`];
+      const byCur = d.byCurrency as Record<string, number>;
+      if (byCur && Object.keys(byCur).length > 0) {
+        parts.push(Object.entries(byCur).map(([c, n]) => `${c}: ${n}`).join(", "));
+      }
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPruning(false);
       load();
     }
   }
@@ -911,7 +1009,7 @@ function SnapshotStatusPanel() {
   const anyFallback = status && (status.fallbackPayments > 0 || status.fallbackCharges > 0);
   const ratesStale = status?.rates.some((r) => r.daysOld > 7) ?? false;
   const noRates = (status?.rates.length ?? 0) === 0;
-  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting;
+  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting || pruning || preCharging || backfillingHebrew;
 
   return (
     <div className="border border-gray-200 rounded-md p-4 bg-white">
@@ -1013,6 +1111,14 @@ function SnapshotStatusPanel() {
                 >
                   Force today
                 </button>
+                <button
+                  onClick={handlePrune}
+                  disabled={anyBusy}
+                  title="Delete exchange_rates rows older than 2 years. Keeps the table small so PostgREST's 1000-row default limit never becomes a problem again."
+                  className="px-2.5 py-1 border border-gray-300 text-gray-700 rounded text-xs hover:bg-white disabled:opacity-50"
+                >
+                  {pruning ? "Pruning…" : "Prune >2y"}
+                </button>
               </div>
             </div>
           </div>
@@ -1027,6 +1133,24 @@ function SnapshotStatusPanel() {
                 title="Creates monthly charge rows for every active student, covering the last 3 academic years. Safe to run repeatedly."
               >
                 {regenerating ? "Regenerating…" : "Regenerate charges for all students"}
+              </button>
+              <button
+                onClick={handlePreChargeNextMonth}
+                disabled={anyBusy}
+                className="px-3 py-1.5 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                title="Bill every active student for the next Hebrew month before its Rosh Chodesh arrives. Idempotent with the daily Rosh-Chodesh cron."
+              >
+                {preCharging
+                  ? "Pre-charging…"
+                  : `Pre-charge ${nextHebrewMonth ? `${nextHebrewMonth.name} ${nextHebrewMonth.year}` : "next Hebrew month"}`}
+              </button>
+              <button
+                onClick={handleBackfillHebrew}
+                disabled={anyBusy}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                title="One-shot migration helper: fill hebrew_month / hebrew_year on any charge row still missing them. Run once after applying migration 006."
+              >
+                {backfillingHebrew ? "Backfilling…" : "Backfill Hebrew months"}
               </button>
               <button
                 onClick={handleRebuild}

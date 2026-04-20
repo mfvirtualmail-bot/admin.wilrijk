@@ -179,18 +179,33 @@ interface CurrencyRateTable {
   latest: { date: string; rate: number; source: FxSource } | null;
 }
 
-/** Load a rate table for one currency. Returns empty rows if none exist. */
+/** Load a rate table for one currency. Returns empty rows if none exist.
+ *
+ *  Supabase/PostgREST applies a default row limit (1000 at the time of
+ *  writing). With 27 years of daily ECB rates (~7000 rows) per currency,
+ *  leaving the limit implicit meant we were only getting 1999-2002 back
+ *  — which is why pickRate kept returning 2002-11-26. We explicitly
+ *  paginate to pull everything. */
 async function loadRateTable(
   db: SupabaseClient,
   currency: Currency,
 ): Promise<CurrencyRateTable> {
-  const { data, error } = await db
-    .from("exchange_rates")
-    .select("date, rate, source")
-    .eq("currency", currency)
-    .order("date", { ascending: true });
-  if (error || !data) return { rows: [], latest: null };
-  const rows = data as Array<{ date: string; rate: number; source: FxSource }>;
+  const rows: Array<{ date: string; rate: number; source: FxSource }> = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await db
+      .from("exchange_rates")
+      .select("date, rate, source")
+      .eq("currency", currency)
+      .order("date", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) return { rows: [], latest: null };
+    if (!data || data.length === 0) break;
+    rows.push(...(data as Array<{ date: string; rate: number; source: FxSource }>));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
   const latest = rows.length > 0 ? rows[rows.length - 1] : null;
   return { rows, latest };
 }

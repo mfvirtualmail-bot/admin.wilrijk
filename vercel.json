@@ -8,6 +8,10 @@
     {
       "path": "/api/fx/cron",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/charges/cron",
+      "schedule": "0 5 * * *"
     }
   ]
 }
