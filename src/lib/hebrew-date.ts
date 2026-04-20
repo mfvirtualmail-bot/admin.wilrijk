@@ -127,6 +127,33 @@ export function hebrewMonthLabel(gregorianMonth: number, gregorianYear: number):
 }
 
 /**
+ * Hebcal month numbering → Hebrew month name.
+ *   1=Nisan, 2=Iyar, 3=Sivan, 4=Tamuz, 5=Av, 6=Elul,
+ *   7=Tishrei, 8=Cheshvan, 9=Kislev, 10=Tevet, 11=Shvat,
+ *   12=Adar (non-leap) / Adar I (leap),
+ *   13=Adar II (leap only).
+ */
+const HEBREW_MONTH_NAMES_BY_HEBCAL: Record<number, string> = {
+  1: "ניסן", 2: "אייר", 3: "סיון", 4: "תמוז", 5: "אב", 6: "אלול",
+  7: "תשרי", 8: "חשון", 9: "כסלו", 10: "טבת", 11: "שבט",
+  12: "אדר", 13: "אדר ב׳",
+};
+
+/**
+ * Build a statement/spreadsheet row label directly from Hebrew identity
+ * (hebcal month number + Hebrew year). Use this when rendering rows keyed
+ * by the real Hebrew month — unlike `hebrewMonthLabel(gregMonth, gregYear)`
+ * it doesn't rely on the Sep→Elul academic-year approximation, so it
+ * correctly distinguishes e.g. Nisan 5786 from Iyar 5786 when both Rosh
+ * Chodesh-dated charges happen to share the same Gregorian (month, year).
+ */
+export function hebrewMonthLabelFromHebrew(hebcalMonth: number, hebrewYear: number): string {
+  let name = HEBREW_MONTH_NAMES_BY_HEBCAL[hebcalMonth] ?? "";
+  if (hebcalMonth === 12 && HDate.isLeapYear(hebrewYear)) name = "אדר א׳";
+  return `${name} ${hebrewYearToLetters(hebrewYear)}`;
+}
+
+/**
  * One Rosh Chodesh entry, as consumed by the charge generator + cron.
  *  - `gregDate` is the Gregorian date of day 1 of this Hebrew month.
  *  - `hebrewMonth` is the hebcal numbering: 1=Nisan..6=Elul, 7=Tishrei..
@@ -145,7 +172,7 @@ export interface RoshChodeshEntry {
  * 2,3,4,5,6, then Tishrei of the next year. The "year rollover" happens
  * after Elul (6), not after Adar/Adar II.
  */
-function nextHebrewMonth(hebrewMonth: number, hebrewYear: number): { hebrewMonth: number; hebrewYear: number } {
+export function nextHebrewMonth(hebrewMonth: number, hebrewYear: number): { hebrewMonth: number; hebrewYear: number } {
   if (hebrewMonth === 6) return { hebrewMonth: 7, hebrewYear: hebrewYear + 1 };
   const monthsThisYear = HDate.monthsInYear(hebrewYear);
   if (hebrewMonth === monthsThisYear) return { hebrewMonth: 1, hebrewYear };

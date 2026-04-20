@@ -51,6 +51,10 @@ export interface Family {
   phone: string | null;
   email: string | null;
   language: "en" | "yi";
+  /** Statement currency. All charges and the balance on this family's
+   *  statement are displayed in this currency; payments made in a
+   *  different currency are converted at the payment date's ECB rate. */
+  currency: Currency;
   notes: string | null;
   is_active: boolean;
   created_at: string;

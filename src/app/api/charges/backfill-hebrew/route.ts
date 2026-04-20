@@ -73,10 +73,54 @@ export async function POST() {
     }
   }
 
+  // After backfill, collapse any duplicate (child_id, hebrew_month, hebrew_year)
+  // rows — produced when both the old Gregorian generator and the new
+  // Rosh-Chodesh generator had written a row for the same Hebrew month.
+  // We keep the newest row (highest created_at, id as tiebreaker) because
+  // its Gregorian (month, year) reflects the real Rosh-Chodesh date, which
+  // is what FX snapshots are anchored on going forward.
+  const { data: allRows, error: dupErr } = await db
+    .from("charges")
+    .select("id, child_id, hebrew_month, hebrew_year, created_at")
+    .not("hebrew_month", "is", null)
+    .not("hebrew_year", "is", null);
+
+  let duplicatesRemoved = 0;
+  if (!dupErr && allRows) {
+    const groups = new Map<string, Array<{ id: string; created_at: string }>>();
+    for (const r of allRows) {
+      const k = `${r.child_id}|${r.hebrew_month}|${r.hebrew_year}`;
+      const list = groups.get(k) ?? [];
+      list.push({ id: r.id as string, created_at: r.created_at as string });
+      groups.set(k, list);
+    }
+    const toDelete: string[] = [];
+    groups.forEach((list) => {
+      if (list.length <= 1) return;
+      list.sort((a: { id: string; created_at: string }, b: { id: string; created_at: string }) => {
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+        return a.id < b.id ? 1 : -1;
+      });
+      // Keep list[0] (newest), delete the rest.
+      for (let i = 1; i < list.length; i++) toDelete.push(list[i].id);
+    });
+    if (toDelete.length > 0) {
+      const { error: delErr } = await db.from("charges").delete().in("id", toDelete);
+      if (delErr) {
+        failures.push({ id: "dedup", message: delErr.message });
+      } else {
+        duplicatesRemoved = toDelete.length;
+      }
+    }
+  } else if (dupErr) {
+    failures.push({ id: "dedup-scan", message: dupErr.message });
+  }
+
   return NextResponse.json({
     ok: true,
     scanned: (rows ?? []).length,
     updated,
+    duplicatesRemoved,
     failures,
   });
 }

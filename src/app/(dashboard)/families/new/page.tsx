@@ -14,9 +14,10 @@ export default function NewFamilyPage() {
     name: "", father_name: "", mother_name: "",
     address: "", city: "", postal_code: "",
     phone: "", email: "", notes: "",
+    currency: "EUR",
   });
 
-  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm((p) => ({ ...p, [key]: e.target.value }));
 
   async function handleSubmit(e: React.FormEvent) {
@@ -93,6 +94,17 @@ export default function NewFamilyPage() {
                 <input type="email" value={form.email} onChange={set("email")}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Statement Currency</label>
+              <select value={form.currency} onChange={set("currency")}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                <option value="EUR">€ EUR</option>
+                <option value="USD">$ USD</option>
+                <option value="GBP">£ GBP</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">The statement, charges and balance for this family will be shown in this currency. Payments made in another currency are converted automatically.</p>
             </div>
 
             <div>
