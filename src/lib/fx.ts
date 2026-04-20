@@ -720,6 +720,13 @@ export async function fetchEcbHistoricalRates(): Promise<{
   earliestDate: string | null;
   latestDate: string | null;
   byCurrency: Record<string, number>;
+  diagnostics: {
+    xmlBytes: number;
+    dayMarkers: number;
+    rateTagsSeen: number;
+    rowsSkippedNoDate: number;
+    rowsSkippedUnsupported: number;
+  };
 }> {
   const res = await fetch(
     "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.xml",
@@ -728,45 +735,59 @@ export async function fetchEcbHistoricalRates(): Promise<{
   if (!res.ok) throw new Error(`ECB history fetch failed: HTTP ${res.status}`);
   const xml = await res.text();
 
-  // The file is nested: an outer <Cube> wraps a series of <Cube time='...'>
-  // day blocks, each containing <Cube currency='X' rate='Y' />. We parse
-  // it with a regex walk over day blocks; XML parsing libs would work
-  // too but this avoids pulling in a dep for one feed.
-  const dayBlockRe = /<Cube\s+time\s*=\s*["'](\d{4}-\d{2}-\d{2})["']\s*>([\s\S]*?)<\/Cube>/g;
-  const rateRe = /<Cube\s+currency\s*=\s*["']([A-Z]{3})["']\s+rate\s*=\s*["']([\d.]+)["']\s*\/?>/g;
+  // Previous regex walked `<Cube time='…'>[BODY]</Cube>` day blocks and
+  // then scanned BODY for rate tags. That breaks whenever a non-greedy
+  // `[\s\S]*?` body hits an unexpected `</Cube>` early (empty-day
+  // placeholders, future format tweaks, etc.). Instead, walk the XML
+  // in ONE pass with a single regex that matches EITHER a `time=` tag
+  // OR a `currency/rate` tag, and carry the "most recently seen time"
+  // as state. This is robust to whatever tag nesting or whitespace
+  // ECB throws at it.
+  const combined = /<Cube\s+(?:time\s*=\s*["'](\d{4}-\d{2}-\d{2})["']|currency\s*=\s*["']([A-Z]{3})["']\s+rate\s*=\s*["']([\d.]+)["'])/g;
 
   const SUPPORTED = new Set<string>(["USD", "GBP"]);
   type Row = { date: string; currency: string; rate: number; source: FxSource };
   const rows: Row[] = [];
   let earliest: string | null = null;
   let latest: string | null = null;
+  let currentDate: string | null = null;
+  let dayMarkers = 0;
+  let rateTagsSeen = 0;
+  let skippedNoDate = 0;
+  let skippedUnsupported = 0;
 
-  let dayMatch: RegExpExecArray | null;
-  while ((dayMatch = dayBlockRe.exec(xml)) !== null) {
-    const date = dayMatch[1];
-    const dayBody = dayMatch[2];
-    if (!earliest || date < earliest) earliest = date;
-    if (!latest || date > latest) latest = date;
-
-    // Reset lastIndex so each day's body is scanned fresh.
-    rateRe.lastIndex = 0;
-    let rateMatch: RegExpExecArray | null;
-    while ((rateMatch = rateRe.exec(dayBody)) !== null) {
-      const currency = rateMatch[1];
-      if (!SUPPORTED.has(currency)) continue;
-      const rate = parseFloat(rateMatch[2]);
+  let m: RegExpExecArray | null;
+  while ((m = combined.exec(xml)) !== null) {
+    if (m[1]) {
+      currentDate = m[1];
+      dayMarkers++;
+      if (!earliest || currentDate < earliest) earliest = currentDate;
+      if (!latest || currentDate > latest) latest = currentDate;
+    } else if (m[2] && m[3]) {
+      rateTagsSeen++;
+      if (!currentDate) { skippedNoDate++; continue; }
+      const currency = m[2];
+      if (!SUPPORTED.has(currency)) { skippedUnsupported++; continue; }
+      const rate = parseFloat(m[3]);
       if (!isFinite(rate) || rate <= 0) continue;
-      rows.push({ date, currency, rate, source: "ecb" });
+      rows.push({ date: currentDate, currency, rate, source: "ecb" });
     }
   }
 
+  const diagnostics = {
+    xmlBytes: xml.length,
+    dayMarkers,
+    rateTagsSeen,
+    rowsSkippedNoDate: skippedNoDate,
+    rowsSkippedUnsupported: skippedUnsupported,
+  };
+
   if (rows.length === 0) {
-    return { rowsUpserted: 0, earliestDate: null, latestDate: null, byCurrency: {} };
+    return { rowsUpserted: 0, earliestDate: null, latestDate: null, byCurrency: {}, diagnostics };
   }
 
-  // Upsert in reasonable chunks — a single upsert of thousands of rows
-  // is fine for Postgres but `fetch`-based Supabase payloads can get
-  // unwieldy. 500 per call is a safe middle ground.
+  // Upsert in 500-row chunks. Unique (date, currency) constraint makes
+  // repeated runs a no-op.
   const db = createServerClient();
   let upserted = 0;
   for (let i = 0; i < rows.length; i += 500) {
@@ -774,7 +795,7 @@ export async function fetchEcbHistoricalRates(): Promise<{
     const { error } = await db
       .from("exchange_rates")
       .upsert(chunk, { onConflict: "date,currency" });
-    if (error) throw new Error(`ECB history upsert failed: ${error.message}`);
+    if (error) throw new Error(`ECB history upsert failed at chunk ${i}: ${error.message}`);
     upserted += chunk.length;
   }
 
@@ -786,5 +807,6 @@ export async function fetchEcbHistoricalRates(): Promise<{
     earliestDate: earliest,
     latestDate: latest,
     byCurrency,
+    diagnostics,
   };
 }
