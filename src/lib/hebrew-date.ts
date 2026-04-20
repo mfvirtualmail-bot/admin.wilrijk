@@ -123,3 +123,31 @@ export function hebrewMonthLabel(gregorianMonth: number, gregorianYear: number):
   const hebrewYear = getHebrewYear(gregorianYear, gregorianMonth);
   return `${monthName} ${hebrewYearToLetters(hebrewYear)}`;
 }
+
+/**
+ * Given a Hebrew month index (0=Elul … 11=Av, academic-year order) and
+ * a Hebrew year number (e.g. 5786), return the corresponding Gregorian
+ * {month, year}. Inverse of `gregorianMonthToIndex` + `getHebrewYear`.
+ *
+ * The calendar flips at Rosh Hashana:
+ *   - Elul (idx 0) is the last month of the PREVIOUS Hebrew year,
+ *     so Gregorian year = hebrewYear - 3760.
+ *   - Tishrei..Dec (idx 1..3) are in the Gregorian year = hebrewYear - 3761.
+ *   - Jan..Aug     (idx 4..11) are in Gregorian year = hebrewYear - 3760.
+ */
+export function hebrewToGregorian(hebrewMonthIdx: number, hebrewYear: number): { month: number; year: number } {
+  // Map index back to Gregorian month: idx 0→9 (Sep), 1→10 (Oct), …
+  const gMonth = hebrewMonthIdx <= 3 ? hebrewMonthIdx + 9 : hebrewMonthIdx - 3;
+  let gYear: number;
+  if (hebrewMonthIdx === 0) {
+    // Elul: Sep of the Gregorian year, still in the previous Hebrew year.
+    gYear = hebrewYear - 3760;
+  } else if (hebrewMonthIdx <= 3) {
+    // Tishrei/Cheshvan/Kislev: Oct-Dec of the *earlier* Gregorian year.
+    gYear = hebrewYear - 3761;
+  } else {
+    // Tevet through Av: Jan-Aug of the *later* Gregorian year.
+    gYear = hebrewYear - 3760;
+  }
+  return { month: gMonth, year: gYear };
+}
