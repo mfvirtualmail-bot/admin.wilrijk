@@ -151,14 +151,32 @@ export async function buildFamilyStatement(
   const familyCurrency: Currency = (family.currency ?? "EUR") as Currency;
 
   const now = new Date(statementDate);
-  // Statement rows are keyed by Hebrew identity (hebrew_year * 14 + hebrew_month)
-  // — 14 slots safely cover hebcal months 1..13 plus a gap. Grouping by
-  // Gregorian (year, month) silently merges two distinct Hebrew months
-  // whenever both their Rosh-Chodesh Gregorian dates land in the same
-  // Gregorian month, or whenever a pre-migration Gregorian-keyed row
-  // coexists with a new Hebrew-keyed row for a different Hebrew month
-  // in that same Gregorian month (the "ניסן shows €1000" bug).
-  const hebrewKey = (hm: number, hy: number) => hy * 14 + hm;
+  // Statement rows are keyed by Hebrew identity. Hebcal numbers months
+  // starting at Nisan=1 (..Adar=12, Adar II=13, then Tishrei=7..Elul=6),
+  // which does NOT match the Hebrew *year* start at Tishrei. Sorting
+  // directly on hebcal month numbers puts Nisan before Tishrei inside
+  // the same hebrew year — which was the root of the "Tishrei–Adar 5786
+  // appear as projected/future even though they're past" bug.
+  //
+  // We use a chronological position (Tishrei=1..Elul=12 or ..Elul=13 in
+  // leap years, Adar II=7) and build the key as hy*14 + chronPos. The
+  // 14 slots still cover 1..13 with one unused slot, so reversing the
+  // key (for ensureProjectedRow) stays unambiguous.
+  const chronPos = (hm: number, hy: number): number => {
+    // hm 7..13 → Tishrei..Adar II: straight Tishrei=1 mapping.
+    if (hm >= 7) return hm - 6;
+    // hm 1..6 (Nisan..Elul) come AFTER Adar/Adar II within the year.
+    return hm + (HDate.isLeapYear(hy) ? 7 : 6);
+  };
+  const posToHm = (pos: number, hy: number): number => {
+    if (pos <= 6) return pos + 6; // 1→Tishrei(7) .. 6→Adar(12)
+    if (HDate.isLeapYear(hy)) {
+      if (pos === 7) return 13;   // Adar II
+      return pos - 7;             // 8→Nisan(1) .. 13→Elul(6)
+    }
+    return pos - 6;                // 7→Nisan(1) .. 12→Elul(6)
+  };
+  const hebrewKey = (hm: number, hy: number) => hy * 14 + chronPos(hm, hy);
   const todayHd = new HDate(now);
   const currentKey = hebrewKey(todayHd.getMonth(), todayHd.getFullYear());
 
@@ -355,10 +373,12 @@ export async function buildFamilyStatement(
     if (existing) return existing;
     if (key > projectedCapKey) return null;
 
-    // Key is hebrew_year*14 + hebrew_month — recover both, then derive the
-    // Gregorian Rosh-Chodesh date for FX anchoring.
+    // Key is hebrew_year*14 + chronPos — recover the hebcal month via
+    // posToHm, then derive the Gregorian Rosh-Chodesh date for FX anchoring.
     const hy = Math.floor(key / 14);
-    const hm = key - hy * 14;
+    const pos = key - hy * 14;
+    if (pos < 1 || pos > 13) return null;
+    const hm = posToHm(pos, hy);
     if (hm < 1 || hm > 13) return null;
     const { month, year } = gregOfHebrewMonth(hm, hy);
     const dayOne = `${year}-${String(month).padStart(2, "0")}-01`;
@@ -514,7 +534,9 @@ export async function buildFamilyStatement(
     // month.
     const latestRow = list.length > 0 ? list[list.length - 1] : null;
     const anchorHy = latestRow ? Math.floor(latestRow.key / 14) : todayHd.getFullYear();
-    const anchorHm = latestRow ? latestRow.key - anchorHy * 14 : todayHd.getMonth();
+    const anchorHm = latestRow
+      ? posToHm(latestRow.key - anchorHy * 14, anchorHy)
+      : todayHd.getMonth();
     const next = nextHebrewMonth(anchorHm, anchorHy);
     return hebrewKey(next.hebrewMonth, next.hebrewYear);
   }
