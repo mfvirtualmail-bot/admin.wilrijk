@@ -50,6 +50,20 @@ interface CellData {
   notes: string | null;
 }
 
+function AddPaymentButtonRenderer(props: ICellRendererParams & { onAdd: (row: SpreadsheetRow) => void }) {
+  const row = props.data as SpreadsheetRow | undefined;
+  if (!row) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); props.onAdd(row); }}
+      className="w-full h-7 rounded bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700"
+    >
+      + €
+    </button>
+  );
+}
+
 function formatDateShort(iso: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -98,19 +112,8 @@ export default function SpreadsheetPage() {
         editable: false,
         sortable: false,
         filter: false,
-        cellRenderer: (p: ICellRendererParams) => {
-          const row = p.data as SpreadsheetRow | undefined;
-          if (!row) return null;
-          const btn = document.createElement("button");
-          btn.textContent = "+ €";
-          btn.className =
-            "w-full h-7 rounded bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700";
-          btn.onclick = (e) => {
-            e.stopPropagation();
-            setModalFamily(row);
-          };
-          return btn;
-        },
+        cellRenderer: AddPaymentButtonRenderer,
+        cellRendererParams: { onAdd: (row: SpreadsheetRow) => setModalFamily(row) },
       },
       {
         field: "familyName",

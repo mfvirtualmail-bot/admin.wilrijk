@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fontsource/noto-sans-hebrew": "^5.2.8",
+    "@hebcal/core": "^6.3.2",
     "@react-pdf/renderer": "^3.4.5",
     "@supabase/supabase-js": "^2.103.0",
     "ag-grid-community": "^35.2.1",

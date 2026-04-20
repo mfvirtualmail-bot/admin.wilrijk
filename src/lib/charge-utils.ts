@@ -7,12 +7,15 @@ import type { Currency } from "./types";
  * Generate monthly charges for one student.
  *
  * Rule (as of this revision): charges run from the student's enrollment
- * START month/year up to min(enrollment_end, today). Future months are
- * never pre-billed; months outside an explicit enrollment window are
- * never billed.
+ * START month/year up to min(enrollment_end, throughDate). `throughDate`
+ * defaults to today — callers who want to pre-bill upcoming months
+ * (e.g. "charge all parents for next Hebrew month before it begins")
+ * pass a future date here. Months outside an explicit enrollment window
+ * are never billed.
  *
  * Uses upsert with ignoreDuplicates so it's safe to call repeatedly —
- * existing (child_id, month, year) rows aren't overwritten.
+ * existing (child_id, month, year) rows aren't overwritten. That's what
+ * keeps pre-charging and the monthly cron from double-billing.
  */
 export async function generateChargesForChild(
   db: SupabaseClient,
@@ -24,10 +27,11 @@ export async function generateChargesForChild(
   startYear: number | null,
   endMonth: number | null,
   endYear: number | null,
+  throughDate?: Date,
 ): Promise<number> {
   if (monthlyTuition <= 0) return 0;
 
-  const months = getEnrollmentMonths(startMonth, startYear, endMonth, endYear);
+  const months = getEnrollmentMonths(startMonth, startYear, endMonth, endYear, throughDate);
   if (months.length === 0) return 0;
 
   // Snapshot the EUR equivalent at the rate for each month's first day,
