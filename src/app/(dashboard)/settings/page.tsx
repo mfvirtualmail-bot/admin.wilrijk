@@ -780,23 +780,27 @@ function SnapshotStatusPanel() {
   //         'fallback' (i.e. their EUR conversion used a later rate
   //         because no historical one existed). Safe: 'manual' rows are
   //         never touched.
-  async function handleResnapshotFallback() {
+  async function handleResnapshot(mode: "fallback" | "non-manual") {
+    const label = mode === "fallback" ? "fallback rows only" : "ALL non-manual rows";
     if (!confirm(
-      "Re-snapshot every row whose FX rate came from a 'fallback' (a rate from a different date)? " +
-      "This clears their EUR snapshot and re-runs the snapshot using the (now populated) historical rates. " +
-      "Manual overrides are preserved.",
+      `Re-snapshot ${label}? This clears each target row's EUR snapshot and ` +
+      `re-runs the snapshot using the current exchange_rates table. Manual ` +
+      `overrides are NEVER touched. Safe to run repeatedly.` +
+      (mode === "non-manual"
+        ? "\n\nUse this after Fetch full history if existing 'historical' rows are stamped with a stale rate_date (e.g. 2002) because the old parser dropped modern rates."
+        : ""),
     )) return;
     setResnapshotting(true);
     setErr(null);
-    setProgress("Re-snapshotting fallback rows…");
+    setProgress(`Re-snapshotting ${label}…`);
     let totalPayments = 0;
     let totalCharges = 0;
     try {
-      // First call includes fallback=1 (which NULLs out fallback rows,
-      // then processes). Subsequent calls just continue the work; no
-      // need to include=fallback again because they're already NULL.
-      for (let i = 0; i < 40; i++) {
-        const include = i === 0 ? "&include=fallback" : "";
+      // First call uses the chosen include= mode (NULLs out the
+      // targeted rows then re-snapshots). Subsequent calls continue
+      // any leftover NULL rows.
+      for (let i = 0; i < 80; i++) {
+        const include = i === 0 ? `&include=${mode}` : "";
         const res = await fetch(`/api/fx/rebuild-snapshots?limit=500${include}`, { method: "POST" });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error ?? "Re-snapshot failed");
@@ -811,7 +815,7 @@ function SnapshotStatusPanel() {
           throw new Error(`Stopped — ${remaining} row(s) still have no usable rate. Fetch ECB history or add a manual rate.`);
         }
       }
-      setProgress(`Done. Re-snapshotted ${totalPayments} payment(s) + ${totalCharges} charge(s) using historical rates.`);
+      setProgress(`Done. Re-snapshotted ${totalPayments} payment(s) + ${totalCharges} charge(s) using current rate table.`);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -1024,7 +1028,7 @@ function SnapshotStatusPanel() {
                 {rebuilding ? "Rebuilding…" : anyMissing ? "Rebuild EUR snapshots" : "Snapshots complete"}
               </button>
               <button
-                onClick={handleResnapshotFallback}
+                onClick={() => handleResnapshot("fallback")}
                 disabled={anyBusy || !anyFallback}
                 className="px-3 py-1.5 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
                 title="Clears eur_amount on rows with kind='fallback' and re-runs snapshot using historical rates. Manual overrides preserved."
@@ -1035,12 +1039,22 @@ function SnapshotStatusPanel() {
                     ? `Re-snapshot ${(status?.fallbackPayments ?? 0) + (status?.fallbackCharges ?? 0)} fallback row(s)`
                     : "No fallback rows"}
               </button>
+              <button
+                onClick={() => handleResnapshot("non-manual")}
+                disabled={anyBusy}
+                className="px-3 py-1.5 bg-rose-600 text-white rounded-md text-sm font-medium hover:bg-rose-700 disabled:opacity-50"
+                title="Re-snapshots ALL non-EUR rows except manual overrides. Use after Fetch full history fixes stale rates."
+              >
+                {resnapshotting ? "Re-snapshotting…" : "Re-snapshot all (non-manual)"}
+              </button>
             </div>
             <p className="text-[11px] text-gray-500">
-              Recommended order: <strong>Fetch full history</strong> →{" "}
-              <strong>Regenerate charges</strong> → <strong>Rebuild EUR snapshots</strong> →{" "}
-              <strong>Re-snapshot fallback rows</strong> (only needed once after first
-              populating historical ECB rates).
+              Recommended order after a fresh ECB history fetch:{" "}
+              <strong>Fetch full history</strong> →{" "}
+              <strong>Regenerate charges</strong> →{" "}
+              <strong>Re-snapshot all (non-manual)</strong>. The other two
+              buttons are narrower tools kept for cases where you only need
+              to touch NULL or fallback-labelled rows specifically.
             </p>
           </div>
 
