@@ -3,13 +3,7 @@ import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { hebrewMonthLabel } from "@/lib/hebrew-date";
-import {
-  loadTablesForCurrencies,
-  fillPaymentEurInMemory,
-  fillChargeEurInMemory,
-  type PaymentEurRow,
-  type ChargeEurRow,
-} from "@/lib/fx";
+import { buildFamilyStatement } from "@/lib/statement-data";
 import type { Currency } from "@/lib/types";
 
 async function getSessionUser() {
@@ -35,12 +29,6 @@ function monthYear(baseYear: number, month: number) {
   return { month, year: month >= 9 ? baseYear : baseYear + 1 };
 }
 
-function eurToBase(eurAmount: number, base: Currency, rates: Map<Currency, number>): number {
-  if (base === "EUR") return eurAmount;
-  const r = rates.get(base) ?? 1;
-  return eurAmount * r;
-}
-
 function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
@@ -55,111 +43,30 @@ export async function GET() {
   const db = createServerClient();
   const academicYear = getAcademicYear();
   const months = ACADEMIC_MONTHS.map((m) => monthYear(academicYear, m.month));
-  const minYear = academicYear;
-  const maxYear = academicYear + 1;
 
-  const [familiesRes, childrenRes, paymentsRes, chargesRes] = await Promise.all([
-    db.from("families").select("id, name, father_name").eq("is_active", true).order("name"),
-    db.from("children").select("family_id, monthly_tuition, currency").eq("is_active", true),
-    db.from("payments")
-      .select("id, family_id, amount, currency, payment_date, payment_method, month, year, notes, eur_amount, eur_rate, eur_rate_date, eur_rate_kind")
-      .gte("year", minYear)
-      .lte("year", maxYear),
-    db.from("charges")
-      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind")
-      .gte("year", minYear)
-      .lte("year", maxYear),
-  ]);
+  const familiesRes = await db
+    .from("families")
+    .select("id, name, father_name")
+    .eq("is_active", true)
+    .order("name");
 
-  if (familiesRes.error) return NextResponse.json({ error: familiesRes.error.message }, { status: 500 });
-
+  if (familiesRes.error) {
+    return NextResponse.json({ error: familiesRes.error.message }, { status: 500 });
+  }
   const families = familiesRes.data ?? [];
-  const children = (childrenRes.data ?? []) as Array<{ family_id: string; monthly_tuition: number; currency: Currency | null }>;
-  const payments = (paymentsRes.data ?? []) as Array<PaymentEurRow & {
-    family_id: string; payment_method: string; month: number | null; year: number | null; notes: string | null;
-  }>;
-  const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
 
-  // Build the per-currency rate table once, fill missing eur_amount in
-  // memory (no DB writes — that caused the timeout). Persistent backfill
-  // lives behind /api/fx/rebuild-snapshots.
-  const currencies = new Set<Currency>();
-  for (const r of payments) {
-    const c = (r.currency ?? "EUR") as Currency;
-    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
-  }
-  for (const r of charges) {
-    const c = (r.currency ?? "EUR") as Currency;
-    if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
-  }
-  for (const c of children) {
-    const cur = (c.currency ?? "EUR") as Currency;
-    if (cur === "EUR" || cur === "USD" || cur === "GBP") currencies.add(cur);
-  }
-  const tables = await loadTablesForCurrencies(db, currencies);
-  fillPaymentEurInMemory(payments, tables);
-  fillChargeEurInMemory(charges, tables);
+  // Build a full FIFO statement per family so cells match what the
+  // statement PDF fills in. This mirrors the allocator used by
+  // /api/statements, so paid months appear across the spreadsheet in
+  // the same order payments landed — even when a payment has no
+  // month/year hint, and even when one payment spans multiple months.
+  const statements = await Promise.all(
+    families.map((f) => buildFamilyStatement(db, f.id))
+  );
 
-  // "Today's rate" per currency — prefer the actual latest rate in the
-  // table we already loaded (falls back to 1 for EUR).
-  const rates = new Map<Currency, number>();
-  rates.set("EUR", 1);
-  for (const c of ["USD", "GBP"] as Currency[]) {
-    const latest = tables.get(c)?.latest;
-    if (latest) rates.set(c, Number(latest.rate));
-  }
-
-  // Base currency per family: first non-EUR child tuition currency we
-  // see, else EUR. Matches "if tuition is in GBP, totals stay in GBP".
-  const baseByFamily = new Map<string, Currency>();
-  const childrenByFamily = new Map<string, Array<{ monthly_tuition: number; currency: Currency }>>();
-  for (const c of children) {
-    const cur: Currency = (c.currency ?? "EUR") as Currency;
-    if (!childrenByFamily.has(c.family_id)) childrenByFamily.set(c.family_id, []);
-    childrenByFamily.get(c.family_id)!.push({ monthly_tuition: Number(c.monthly_tuition), currency: cur });
-    const existing = baseByFamily.get(c.family_id);
-    if (!existing) baseByFamily.set(c.family_id, cur);
-    else if (existing === "EUR" && cur !== "EUR") baseByFamily.set(c.family_id, cur);
-  }
-
-  // Monthly tuition per family in base currency. (Children's tuition
-  // doesn't have its own snapshot row, so we convert via EUR at today's
-  // rate using a simple two-leg pivot.)
-  const tuitionByFamily = new Map<string, number>();
-  for (const [famId, kids] of Array.from(childrenByFamily.entries())) {
-    const base = baseByFamily.get(famId) ?? "EUR";
-    let sum = 0;
-    for (const k of kids) {
-      const rateFrom = rates.get(k.currency) ?? 1;
-      const eur = k.monthly_tuition / rateFrom;
-      sum += eurToBase(eur, base, rates);
-    }
-    tuitionByFamily.set(famId, round2(sum));
-  }
-
-  // Charges per (family, month, year) in family's base currency.
-  const chargesByFamilyMonth = new Map<string, number>();
-  for (const c of charges) {
-    const base = baseByFamily.get(c.family_id) ?? "EUR";
-    const inBase = eurToBase(Number(c.eur_amount ?? 0), base, rates);
-    const key = `${c.family_id}:${c.month}:${c.year}`;
-    chargesByFamilyMonth.set(key, (chargesByFamilyMonth.get(key) ?? 0) + inBase);
-  }
-
-  // Index payments by (family, month, year). Keep latest if multiple.
-  const paymentIndex = new Map<string, (typeof payments)[number]>();
-  for (const p of payments) {
-    if (p.month && p.year) {
-      paymentIndex.set(`${p.family_id}:${p.month}:${p.year}`, p);
-    }
-  }
-
-  const now = new Date();
-  const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
-
-  const rows = families.map((family) => {
-    const base: Currency = baseByFamily.get(family.id) ?? "EUR";
-    const monthlyTuition = tuitionByFamily.get(family.id) ?? 0;
+  const rows = families.map((family, i) => {
+    const stmt = statements[i];
+    const base: Currency = (stmt?.currency ?? "EUR") as Currency;
 
     const monthData: Record<string, {
       paymentId: string | null;
@@ -170,31 +77,54 @@ export async function GET() {
       notes: string | null;
     }> = {};
 
-    let totalPaid = 0;
-    let totalCharged = 0;
-
     for (const { month, year } of months) {
-      const key = `${family.id}:${month}:${year}`;
       const monthKey = `m_${month}_${year}`;
-      const payment = paymentIndex.get(key) ?? null;
+      monthData[monthKey] = { paymentId: null, date: null, method: null, amount: null, currency: null, notes: null };
+    }
 
-      if (payment) {
-        const paidCur: Currency = (payment.currency ?? "EUR") as Currency;
-        totalPaid += eurToBase(Number(payment.eur_amount ?? 0), base, rates);
-        monthData[monthKey] = {
-          paymentId: payment.id,
-          date: payment.payment_date,
-          method: payment.payment_method,
-          amount: Number(payment.amount),
-          currency: paidCur,
-          notes: payment.notes,
-        };
-      } else {
-        monthData[monthKey] = { paymentId: null, date: null, method: null, amount: null, currency: null, notes: null };
+    let monthlyTuition = 0;
+    let totalCharged = 0;
+    let totalPaid = 0;
+    let balance = 0;
+
+    if (stmt) {
+      totalCharged = stmt.totalCharged;
+      totalPaid = stmt.totalPaid;
+      balance = stmt.balanceDue;
+
+      // Approximate "monthly tuition" for cell-colour comparison: take
+      // the most common totalCharge across real charge rows, or the
+      // last row's total if we only have one. Used only for the
+      // paid/partial/unpaid traffic-light background.
+      const realTotals = stmt.rows
+        .filter((r) => r.kind === "charge" && r.totalCharge > 0)
+        .map((r) => r.totalCharge);
+      if (realTotals.length > 0) {
+        monthlyTuition = realTotals[realTotals.length - 1];
       }
 
-      if (year * 12 + month <= currentKey) {
-        totalCharged += chargesByFamilyMonth.get(key) ?? 0;
+      // Fill each academic-year cell with the sum of FIFO fragments
+      // that landed on that Gregorian (month, year). Multiple
+      // fragments merge into one cell; a summary note reports how
+      // many payments contributed.
+      for (const row of stmt.rows) {
+        const monthKey = `m_${row.month}_${row.year}`;
+        if (!(monthKey in monthData)) continue;
+        const frags = row.paymentsApplied;
+        if (frags.length === 0) continue;
+
+        const sum = frags.reduce((s, f) => s + f.amount, 0);
+        const first = frags[0];
+        const methods = new Set(frags.map((f) => f.method));
+
+        monthData[monthKey] = {
+          paymentId: frags.length === 1 ? first.paymentId : null,
+          date: first.paymentDate,
+          method: methods.size === 1 ? first.method : "multi",
+          amount: round2(sum),
+          currency: base,
+          notes: frags.length > 1 ? `${frags.length} payments` : null,
+        };
       }
     }
 
@@ -205,7 +135,7 @@ export async function GET() {
       monthlyTuition: round2(monthlyTuition),
       totalCharged: round2(totalCharged),
       totalPaid: round2(totalPaid),
-      balance: round2(totalCharged - totalPaid),
+      balance: round2(balance),
       ...monthData,
     };
   });
