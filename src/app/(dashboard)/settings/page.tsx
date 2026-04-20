@@ -699,6 +699,7 @@ function SnapshotStatusPanel() {
   const [pruning, setPruning] = useState(false);
   const [preCharging, setPreCharging] = useState(false);
   const [backfillingHebrew, setBackfillingHebrew] = useState(false);
+  const [backfillingCharges, setBackfillingCharges] = useState(false);
   const [nextHebrewMonth, setNextHebrewMonth] = useState<{ name: string; year: number } | null>(null);
   const [chargingSpecific, setChargingSpecific] = useState(false);
   const [monthOptions, setMonthOptions] = useState<Array<{ hebrew_month: number; hebrew_year: number; label: string; greg_date: string; is_current: boolean }>>([]);
@@ -1027,6 +1028,39 @@ function SnapshotStatusPanel() {
     }
   }
 
+  // --- 2b. Non-destructive sweep: fill in missing charges for every active
+  //         student without touching existing rows. Fixes legacy students
+  //         whose initial charge generation silently failed (FX errors etc.)
+  //         without wiping correctly-billed students.
+  async function handleBackfillCharges() {
+    if (!confirm(
+      "Backfill missing charges for every active student? This is NON-DESTRUCTIVE — " +
+      "existing charges are preserved; only missing months are added.",
+    )) return;
+    setBackfillingCharges(true);
+    setErr(null);
+    setProgress("Backfilling missing charges…");
+    try {
+      const res = await fetch("/api/charges/backfill", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Backfill failed");
+      const parts = [
+        `Created ${d.created} charge(s) across ${d.studentsWithNewCharges} student(s)`,
+        `${d.studentsProcessed} processed`,
+      ];
+      const sk = d.skippedReasons ?? {};
+      if ((sk.noTuition ?? 0) > 0) parts.push(`${sk.noTuition} skipped (no tuition)`);
+      if ((sk.noEnrollmentStart ?? 0) > 0) parts.push(`${sk.noEnrollmentStart} skipped (no enrollment start)`);
+      if ((d.failures as unknown[]).length > 0) parts.push(`${(d.failures as unknown[]).length} failed`);
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBackfillingCharges(false);
+      load();
+    }
+  }
+
   // --- 3. Rebuild eur_amount for all payment/charge rows that are NULL.
   //        Loops the batched endpoint until nothing remains. Stops if a
   //        pass writes zero rows (means no rate is available — user
@@ -1068,7 +1102,7 @@ function SnapshotStatusPanel() {
   const anyFallback = status && (status.fallbackPayments > 0 || status.fallbackCharges > 0);
   const ratesStale = status?.rates.some((r) => r.daysOld > 7) ?? false;
   const noRates = (status?.rates.length ?? 0) === 0;
-  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting || pruning || preCharging || backfillingHebrew || chargingSpecific;
+  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting || pruning || preCharging || backfillingHebrew || backfillingCharges || chargingSpecific;
 
   return (
     <div className="border border-gray-200 rounded-md p-4 bg-white">
@@ -1220,6 +1254,14 @@ function SnapshotStatusPanel() {
                 title="Creates monthly charge rows for every active student, covering the last 3 academic years. Safe to run repeatedly."
               >
                 {regenerating ? "Regenerating…" : "Regenerate charges for all students"}
+              </button>
+              <button
+                onClick={handleBackfillCharges}
+                disabled={anyBusy}
+                className="px-3 py-1.5 bg-teal-600 text-white rounded-md text-sm font-medium hover:bg-teal-700 disabled:opacity-50"
+                title="Non-destructive: fills in missing charges for every active student without touching existing rows."
+              >
+                {backfillingCharges ? "Backfilling…" : "Backfill missing charges"}
               </button>
               <button
                 onClick={handlePreChargeNextMonth}

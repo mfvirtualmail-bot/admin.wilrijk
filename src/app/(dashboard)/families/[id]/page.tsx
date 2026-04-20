@@ -58,6 +58,7 @@ export default function FamilyDetailPage() {
   });
   const [savingChild, setSavingChild] = useState(false);
   const [deletingChild, setDeletingChild] = useState<string | null>(null);
+  const [regeneratingChild, setRegeneratingChild] = useState<string | null>(null);
 
   // Edit child state
   const [editingChild, setEditingChild] = useState<string | null>(null);
@@ -149,6 +150,24 @@ export default function FamilyDetailPage() {
       setShowAddChild(false);
     } else { const d = await res.json(); alert(d.error || "Failed to add child"); }
     setSavingChild(false);
+  }
+
+  async function handleRegenerateChild(childId: string, name: string) {
+    if (!confirm(
+      `Regenerate charges for ${name}?\n\n` +
+      `This wipes existing charges for this student and rebuilds them from their enrollment window. ` +
+      `Payments are NOT touched.`,
+    )) return;
+    setRegeneratingChild(childId);
+    const res = await fetch(`/api/children/${childId}/regenerate-charges`, { method: "POST" });
+    const d = await res.json();
+    if (res.ok) {
+      await loadFamily();
+      alert(`Created ${d.created} charge(s) for ${name}.`);
+    } else {
+      alert(d.error || "Regenerate failed");
+    }
+    setRegeneratingChild(null);
   }
 
   async function handleDeleteChild(childId: string, name: string) {
@@ -596,6 +615,12 @@ export default function FamilyDetailPage() {
                             <button onClick={() => startEditChild(c)}
                               className="text-blue-500 hover:text-blue-700 text-xs font-medium">
                               Edit
+                            </button>
+                            <button onClick={() => handleRegenerateChild(c.id, `${c.first_name} ${c.last_name}`)}
+                              disabled={regeneratingChild === c.id}
+                              className="text-purple-600 hover:text-purple-800 text-xs font-medium disabled:opacity-40"
+                              title="Wipe and rebuild this student's monthly charges from their enrollment window">
+                              {regeneratingChild === c.id ? "…" : "Regen charges"}
                             </button>
                             <button onClick={() => handleDeleteChild(c.id, `${c.first_name} ${c.last_name}`)}
                               disabled={deletingChild === c.id}
