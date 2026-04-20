@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { HDate } from "@hebcal/core";
 import type { Family, Child, Charge, Payment, Currency } from "./types";
-import { hebrewMonthLabel } from "./hebrew-date";
+import { hebrewMonthLabelFromHebrew, nextHebrewMonth } from "./hebrew-date";
 import {
   loadTablesForCurrencies,
   fillChargeEurInMemory,
@@ -128,7 +129,35 @@ export async function buildFamilyStatement(
   const familyCurrency: Currency = (family.currency ?? "EUR") as Currency;
 
   const now = new Date(statementDate);
-  const currentKey = now.getFullYear() * 12 + (now.getMonth() + 1);
+  // Statement rows are keyed by Hebrew identity (hebrew_year * 14 + hebrew_month)
+  // — 14 slots safely cover hebcal months 1..13 plus a gap. Grouping by
+  // Gregorian (year, month) silently merges two distinct Hebrew months
+  // whenever both their Rosh-Chodesh Gregorian dates land in the same
+  // Gregorian month, or whenever a pre-migration Gregorian-keyed row
+  // coexists with a new Hebrew-keyed row for a different Hebrew month
+  // in that same Gregorian month (the "ניסן shows €1000" bug).
+  const hebrewKey = (hm: number, hy: number) => hy * 14 + hm;
+  const todayHd = new HDate(now);
+  const currentKey = hebrewKey(todayHd.getMonth(), todayHd.getFullYear());
+
+  /** Hebrew identity of a charge row. Uses the stored hebrew_month/year
+   *  when present; falls back to computing from day 1 of the Gregorian
+   *  month so pre-migration rows still group under *some* Hebrew month
+   *  (matching what backfill-hebrew would assign them). */
+  const hebrewIdentityOfCharge = (ch: Charge): { hm: number; hy: number } => {
+    if (ch.hebrew_month != null && ch.hebrew_year != null) {
+      return { hm: Number(ch.hebrew_month), hy: Number(ch.hebrew_year) };
+    }
+    const hd = new HDate(new Date(Number(ch.year), Number(ch.month) - 1, 1));
+    return { hm: hd.getMonth(), hy: hd.getFullYear() };
+  };
+
+  /** Gregorian (month, year) of the first day of a given Hebrew month —
+   *  used to pick an FX anchor date for projected rows. */
+  const gregOfHebrewMonth = (hm: number, hy: number): { month: number; year: number } => {
+    const g = new HDate(1, hm, hy).greg();
+    return { month: g.getMonth() + 1, year: g.getFullYear() };
+  };
 
   const childById = new Map<string, Child>();
   for (const c of children) childById.set(c.id, c);
@@ -165,7 +194,8 @@ export async function buildFamilyStatement(
   const rowByKey = new Map<number, InternalRow>();
 
   for (const ch of chargeRowsAll) {
-    const key = Number(ch.year) * 12 + Number(ch.month);
+    const { hm, hy } = hebrewIdentityOfCharge(ch);
+    const key = hebrewKey(hm, hy);
     if (key > currentKey) continue;
     const fxDate = `${ch.year}-${String(ch.month).padStart(2, "0")}-01`;
     const eur = Number(ch.eur_amount ?? 0);
@@ -179,7 +209,7 @@ export async function buildFamilyStatement(
         kind: "charge",
         month: Number(ch.month),
         year: Number(ch.year),
-        periodLabel: hebrewMonthLabel(Number(ch.month), Number(ch.year)),
+        periodLabel: hebrewMonthLabelFromHebrew(hm, hy),
         totalCharge: 0,
         children: [],
         paymentsApplied: [],
@@ -232,6 +262,14 @@ export async function buildFamilyStatement(
     }
 
     totalPaid = round2(totalPaid + amountFamily);
+    // Convert the operator's optional Gregorian (month, year) hint to a
+    // Hebrew key, matching how rows are keyed. Uses day 1 of the chosen
+    // Gregorian month as the anchor.
+    let hintKey: number | null = null;
+    if (p.month != null && p.year != null) {
+      const hintHd = new HDate(new Date(Number(p.year), Number(p.month) - 1, 1));
+      hintKey = hebrewKey(hintHd.getMonth(), hintHd.getFullYear());
+    }
     paymentsCcy.push({
       id: p.id,
       amountFamily: round2(amountFamily),
@@ -240,9 +278,7 @@ export async function buildFamilyStatement(
       paymentDate: dateStr,
       method: (p.payment_method ?? "other") as string,
       reference: p.reference ?? null,
-      hintKey: p.month != null && p.year != null
-        ? Number(p.year) * 12 + Number(p.month)
-        : null,
+      hintKey,
       fxNote,
     });
   }
@@ -265,7 +301,17 @@ export async function buildFamilyStatement(
   // contributing children caps the projection — any further overpayment
   // lands in `credit`.
 
-  const projectedCapKey = currentKey + PROJECTED_HORIZON_MONTHS;
+  // Walk forward exactly PROJECTED_HORIZON_MONTHS Hebrew months from today
+  // to cap projection. Hebrew keys aren't contiguous across year boundaries
+  // and leap-year Adars, so we can't just add 36.
+  let capHm = todayHd.getMonth();
+  let capHy = todayHd.getFullYear();
+  for (let i = 0; i < PROJECTED_HORIZON_MONTHS; i++) {
+    const nxt = nextHebrewMonth(capHm, capHy);
+    capHm = nxt.hebrewMonth;
+    capHy = nxt.hebrewYear;
+  }
+  const projectedCapKey = hebrewKey(capHm, capHy);
   let credit = 0;
 
   const applyToRow = (row: InternalRow, pay: PaymentInCcy, amount: number) => {
@@ -287,8 +333,12 @@ export async function buildFamilyStatement(
     if (existing) return existing;
     if (key > projectedCapKey) return null;
 
-    const year = Math.floor((key - 1) / 12);
-    const month = ((key - 1) % 12) + 1;
+    // Key is hebrew_year*14 + hebrew_month — recover both, then derive the
+    // Gregorian Rosh-Chodesh date for FX anchoring.
+    const hy = Math.floor(key / 14);
+    const hm = key - hy * 14;
+    if (hm < 1 || hm > 13) return null;
+    const { month, year } = gregOfHebrewMonth(hm, hy);
     const dayOne = `${year}-${String(month).padStart(2, "0")}-01`;
 
     // Which children would be billed for this projected month?
@@ -339,7 +389,7 @@ export async function buildFamilyStatement(
       kind: "projected",
       month,
       year,
-      periodLabel: hebrewMonthLabel(month, year),
+      periodLabel: hebrewMonthLabelFromHebrew(hm, hy),
       totalCharge: total,
       children: contributors,
       paymentsApplied: [],
@@ -435,8 +485,16 @@ export async function buildFamilyStatement(
   }
 
   function nextProjectedKey(list: InternalRow[]): number {
-    const lastKey = list.length > 0 ? list[list.length - 1].key : currentKey - 1;
-    return lastKey + 1;
+    // Step one Hebrew month past the latest row (or the current month if
+    // the list is empty). Hebrew keys aren't contiguous (they skip from
+    // hy*14+13 to (hy+1)*14+1 at Elul→Tishrei, and also leap over the
+    // Adar II slot in non-leap years), so +1 would land on a non-existent
+    // month.
+    const latestRow = list.length > 0 ? list[list.length - 1] : null;
+    const anchorHy = latestRow ? Math.floor(latestRow.key / 14) : todayHd.getFullYear();
+    const anchorHm = latestRow ? latestRow.key - anchorHy * 14 : todayHd.getMonth();
+    const next = nextHebrewMonth(anchorHm, anchorHy);
+    return hebrewKey(next.hebrewMonth, next.hebrewYear);
   }
 }
 
