@@ -696,6 +696,12 @@ function SnapshotStatusPanel() {
   const [fetchingEcb, setFetchingEcb] = useState(false);
   const [fetchingHistory, setFetchingHistory] = useState(false);
   const [resnapshotting, setResnapshotting] = useState(false);
+  const [preCharging, setPreCharging] = useState(false);
+  const [backfillingHebrew, setBackfillingHebrew] = useState(false);
+  const [nextHebrewMonth, setNextHebrewMonth] = useState<{ name: string; year: number } | null>(null);
+  const [chargingSpecific, setChargingSpecific] = useState(false);
+  const [monthOptions, setMonthOptions] = useState<Array<{ hebrew_month: number; hebrew_year: number; label: string; greg_date: string; is_current: boolean }>>([]);
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string>("");
   const [progress, setProgress] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -715,6 +721,124 @@ function SnapshotStatusPanel() {
   }
 
   useEffect(() => { load(); }, []);
+
+  // Load the name of the next Hebrew month so the Pre-charge button can
+  // label itself (e.g. "Pre-charge Iyyar 5786") instead of showing a
+  // generic label.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/charges/pre-charge-next-month");
+        if (!r.ok) return;
+        const d = await r.json();
+        setNextHebrewMonth({ name: d.hebrewMonth, year: d.hebrewYear });
+      } catch {
+        // Non-fatal — button will just show a generic label.
+      }
+    })();
+  }, []);
+
+  // Load Hebrew-month dropdown options for "Charge a specific month".
+  // Defaults the selection to the current Hebrew month so clicking the
+  // button right after pageload does the most common action.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/charges/charge-specific-month");
+        if (!r.ok) return;
+        const d = await r.json();
+        const opts = (d.options ?? []) as typeof monthOptions;
+        setMonthOptions(opts);
+        const current = opts.find((o) => o.is_current);
+        if (current) setSelectedMonthKey(`${current.hebrew_month}:${current.hebrew_year}`);
+      } catch {
+        // Non-fatal — dropdown will just be empty.
+      }
+    })();
+  }, []);
+
+  // --- Pre-charge the next Hebrew month. Operators use this to send
+  //     statements a few days before the month starts. The daily Rosh
+  //     Chodesh cron (/api/charges/cron) won't double-charge because
+  //     both paths upsert on (child_id, hebrew_month, hebrew_year).
+  async function handlePreChargeNextMonth() {
+    const target = nextHebrewMonth ? ` ${nextHebrewMonth.name} ${nextHebrewMonth.year}` : "";
+    if (!confirm(`Pre-charge${target} for every active student now? Safe to re-run — already-billed Hebrew months stay as they are.`)) return;
+    setPreCharging(true);
+    setErr(null);
+    setProgress("Pre-charging next Hebrew month…");
+    try {
+      const res = await fetch("/api/charges/pre-charge-next-month", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Pre-charge failed");
+      setProgress(`Pre-charged ${d.hebrewMonth} ${d.hebrewYear} — created ${d.created} charge(s).`);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPreCharging(false);
+      load();
+    }
+  }
+
+  // --- Charge a specific Hebrew month for all active students. Use this
+  //     when a past / current Hebrew month wasn't billed (Pre-charge-next
+  //     only extends forward to the next Rosh Chodesh). Idempotent —
+  //     students already billed for the selected month are skipped.
+  async function handleChargeSpecificMonth() {
+    if (!selectedMonthKey) return;
+    const [hmStr, hyStr] = selectedMonthKey.split(":");
+    const hm = Number(hmStr);
+    const hy = Number(hyStr);
+    const opt = monthOptions.find((o) => o.hebrew_month === hm && o.hebrew_year === hy);
+    const label = opt?.label ?? `${hm}/${hy}`;
+    if (!confirm(`Charge ${label} for every active student whose enrollment window covers it? Safe to re-run — students already billed for ${label} are skipped.`)) return;
+    setChargingSpecific(true);
+    setErr(null);
+    setProgress(`Charging ${label}…`);
+    try {
+      const res = await fetch("/api/charges/charge-specific-month", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hebrew_month: hm, hebrew_year: hy }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Charge failed");
+      const parts = [`Charged ${d.hebrewMonth} ${d.hebrewYear} — created ${d.created} new row(s)`];
+      if (d.alreadyBilled > 0) parts.push(`${d.alreadyBilled} already billed`);
+      if (d.skippedOutOfWindow > 0) parts.push(`${d.skippedOutOfWindow} outside enrollment window`);
+      if (d.skippedNoStart > 0) parts.push(`${d.skippedNoStart} skipped (no enrollment start)`);
+      if (d.skippedNoTuition > 0) parts.push(`${d.skippedNoTuition} skipped (no tuition)`);
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setChargingSpecific(false);
+      load();
+    }
+  }
+
+  // --- Backfill Hebrew month columns on legacy charge rows. Run once
+  //     after applying migration 006. Idempotent — subsequent runs find
+  //     no NULL rows and do nothing.
+  async function handleBackfillHebrew() {
+    if (!confirm("Backfill Hebrew month / year on every existing charge row? Safe to re-run — only touches rows that are still NULL.")) return;
+    setBackfillingHebrew(true);
+    setErr(null);
+    setProgress("Backfilling Hebrew month columns…");
+    try {
+      const res = await fetch("/api/charges/backfill-hebrew", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Backfill failed");
+      const parts = [`Scanned ${d.scanned}, updated ${d.updated}`];
+      if ((d.failures as unknown[]).length > 0) parts.push(`${(d.failures as unknown[]).length} failed`);
+      setProgress(parts.join(" — "));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBackfillingHebrew(false);
+      load();
+    }
+  }
 
   // --- 1. Fetch ECB rates now. Surfaces any error so the operator can
   //        see whether ECB is actually reachable from the server.
@@ -911,7 +1035,7 @@ function SnapshotStatusPanel() {
   const anyFallback = status && (status.fallbackPayments > 0 || status.fallbackCharges > 0);
   const ratesStale = status?.rates.some((r) => r.daysOld > 7) ?? false;
   const noRates = (status?.rates.length ?? 0) === 0;
-  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting;
+  const anyBusy = rebuilding || regenerating || fetchingEcb || fetchingHistory || resnapshotting || preCharging || backfillingHebrew || chargingSpecific;
 
   return (
     <div className="border border-gray-200 rounded-md p-4 bg-white">
@@ -1019,6 +1143,34 @@ function SnapshotStatusPanel() {
 
           {/* Action buttons. */}
           <div className="flex flex-col gap-2">
+            {/* Explicit "charge ONE specific Hebrew month" — for past /
+                already-started months that Pre-charge-next-month can't
+                reach. Dropdown is 12 past + current + 12 future Hebrew
+                months, with leap-year-aware Adar I / Adar II. */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-xs font-medium text-gray-700">Charge specific month:</label>
+              <select
+                value={selectedMonthKey}
+                onChange={(e) => setSelectedMonthKey(e.target.value)}
+                disabled={anyBusy || monthOptions.length === 0}
+                className="px-2 py-1 border border-gray-300 rounded text-sm bg-white disabled:opacity-50 min-w-[200px]"
+              >
+                {monthOptions.length === 0 && <option value="">Loading…</option>}
+                {monthOptions.map((o) => (
+                  <option key={`${o.hebrew_month}:${o.hebrew_year}`} value={`${o.hebrew_month}:${o.hebrew_year}`}>
+                    {o.label}{o.is_current ? " (current)" : ""} — {o.greg_date}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleChargeSpecificMonth}
+                disabled={anyBusy || !selectedMonthKey}
+                className="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                title="Create Rosh-Chodesh charges for the selected Hebrew month. Idempotent — students already billed for that month are skipped."
+              >
+                {chargingSpecific ? "Charging…" : "Charge this month"}
+              </button>
+            </div>
             <div className="flex items-center gap-3 flex-wrap">
               <button
                 onClick={handleRegenerateCharges}
@@ -1027,6 +1179,24 @@ function SnapshotStatusPanel() {
                 title="Creates monthly charge rows for every active student, covering the last 3 academic years. Safe to run repeatedly."
               >
                 {regenerating ? "Regenerating…" : "Regenerate charges for all students"}
+              </button>
+              <button
+                onClick={handlePreChargeNextMonth}
+                disabled={anyBusy}
+                className="px-3 py-1.5 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                title="Bill every active student for the next Hebrew month before its Rosh Chodesh arrives. Idempotent with the daily Rosh-Chodesh cron."
+              >
+                {preCharging
+                  ? "Pre-charging…"
+                  : `Pre-charge ${nextHebrewMonth ? `${nextHebrewMonth.name} ${nextHebrewMonth.year}` : "next Hebrew month"}`}
+              </button>
+              <button
+                onClick={handleBackfillHebrew}
+                disabled={anyBusy}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                title="One-shot migration helper: fill hebrew_month / hebrew_year on any charge row still missing them. Run once after applying migration 006."
+              >
+                {backfillingHebrew ? "Backfilling…" : "Backfill Hebrew months"}
               </button>
               <button
                 onClick={handleRebuild}
