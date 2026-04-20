@@ -7,6 +7,13 @@ import { snapshotEurFields } from "@/lib/fx";
 import { getEnrollmentMonths } from "@/lib/family-utils";
 import type { Currency } from "@/lib/types";
 
+// Per-child FX lookup + upsert can take noticeable time at 100+ students.
+// Opt into a longer Vercel budget than the 10s hobby default so the
+// endpoint doesn't silently time out mid-loop.
+export const runtime = "nodejs";
+export const maxDuration = 300;
+export const dynamic = "force-dynamic";
+
 /**
  * Charge one specific Hebrew month for every active student.
  *
@@ -107,21 +114,24 @@ export async function POST(req: NextRequest) {
     .eq("is_active", true);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const rows: Array<Record<string, unknown>> = [];
+  // First pass: synchronous filtering. Figures out exactly which
+  // children are eligible — fast because it hits no DB / FX — and
+  // returns their tuition/currency/ids. We'll run FX snapshots for just
+  // the eligible set in parallel, rather than sequentially for every
+  // student the caller didn't actually need.
   let skippedNoTuition = 0;
   let skippedNoStart = 0;
   let skippedOutOfWindow = 0;
+  const eligible: Array<{ childId: string; familyId: string; tuition: number; currency: Currency }> = [];
 
   for (const child of children ?? []) {
     const tuition = Number(child.monthly_tuition);
     if (!isFinite(tuition) || tuition <= 0) { skippedNoTuition++; continue; }
     if (child.enrollment_start_month == null || child.enrollment_start_year == null) { skippedNoStart++; continue; }
 
-    // Use the existing Gregorian enrollment enumerator with
-    // `today = rcDate` so the returned list stops at the Rosh Chodesh
-    // Gregorian month we're billing. Then check whether rcDate's own
-    // (Gregorian month, year) is inside that list — the "is this Rosh
-    // Chodesh inside the enrollment window?" guard.
+    // Check whether rcDate's Gregorian (month, year) is inside the
+    // student's enrollment window — the "is this Rosh Chodesh inside
+    // the enrollment window?" guard.
     const greg = getEnrollmentMonths(
       child.enrollment_start_month as number,
       child.enrollment_start_year as number,
@@ -132,23 +142,36 @@ export async function POST(req: NextRequest) {
     const insideWindow = greg.some((g) => g.month === rcGregMonth && g.year === rcGregYear);
     if (!insideWindow) { skippedOutOfWindow++; continue; }
 
-    const currency = (child.currency ?? "EUR") as Currency;
-    const eur = await snapshotEurFields(tuition, currency, rcIso);
-    rows.push({
-      child_id: child.id as string,
-      family_id: child.family_id as string,
-      month: rcGregMonth,
-      year: rcGregYear,
-      hebrew_month: hm,
-      hebrew_year: hy,
-      amount: tuition,
-      currency,
-      eur_amount: eur.eur_amount,
-      eur_rate: eur.eur_rate,
-      eur_rate_date: eur.eur_rate_date,
-      eur_rate_kind: eur.eur_rate_kind,
+    eligible.push({
+      childId: child.id as string,
+      familyId: child.family_id as string,
+      tuition,
+      currency: (child.currency ?? "EUR") as Currency,
     });
   }
+
+  // Second pass: FX snapshots in parallel. Each student's snapshot is
+  // an independent DB lookup, so Promise.all cuts wall time from N
+  // sequential round-trips to one.
+  const rows = await Promise.all(
+    eligible.map(async (e) => {
+      const eur = await snapshotEurFields(e.tuition, e.currency, rcIso);
+      return {
+        child_id: e.childId,
+        family_id: e.familyId,
+        month: rcGregMonth,
+        year: rcGregYear,
+        hebrew_month: hm,
+        hebrew_year: hy,
+        amount: e.tuition,
+        currency: e.currency,
+        eur_amount: eur.eur_amount,
+        eur_rate: eur.eur_rate,
+        eur_rate_date: eur.eur_rate_date,
+        eur_rate_kind: eur.eur_rate_kind,
+      };
+    }),
+  );
 
   let created = 0;
   if (rows.length > 0) {
