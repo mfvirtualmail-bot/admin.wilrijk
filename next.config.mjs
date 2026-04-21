@@ -7,10 +7,10 @@ const nextConfig = {
     // route that generates statements. (Next 14 keeps this flag under
     // `experimental`; it moved to the top level in Next 15.)
     outputFileTracingIncludes: {
-      "/api/email/pdf": ["./fonts/**/*"],
-      "/api/email/send": ["./fonts/**/*"],
-      "/api/email/test": ["./fonts/**/*"],
-      "/api/email/cron": ["./fonts/**/*"],
+      "/api/email/pdf": ["./fonts/**/*", "./public/logo.png"],
+      "/api/email/send": ["./fonts/**/*", "./public/logo.png"],
+      "/api/email/test": ["./fonts/**/*", "./public/logo.png"],
+      "/api/email/cron": ["./fonts/**/*", "./public/logo.png"],
     },
   },
 };

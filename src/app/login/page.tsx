@@ -41,6 +41,12 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-lg shadow-md p-8">
           <div className="text-center mb-8">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="ישיבת עץ חיים וילריק"
+              className="mx-auto mb-4 h-28 w-auto"
+            />
             <h1 className="text-2xl font-bold text-gray-900">Admin Wilrijk</h1>
             <p className="text-sm text-gray-500 mt-1">
               Tuition Management System
