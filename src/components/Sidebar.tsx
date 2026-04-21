@@ -41,7 +41,11 @@ export default function Sidebar() {
 
   return (
     <aside className="w-64 bg-gray-900 text-white min-h-screen flex flex-col">
-      <div className="p-4 border-b border-gray-700">
+      <div className="p-4 border-b border-gray-700 flex flex-col items-center text-center">
+        <div className="bg-white rounded-lg p-2 mb-3 shadow-sm">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="" className="h-20 w-auto" />
+        </div>
         <h1 className="text-lg font-bold">{t(locale, "app.title")}</h1>
         <p className="text-xs text-gray-400">{t(locale, "app.subtitle")}</p>
       </div>

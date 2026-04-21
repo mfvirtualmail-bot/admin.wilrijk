@@ -44,6 +44,18 @@ function ensureNotoFont() {
   notoFontRegistered = true;
 }
 
+/** Resolve the statement header logo. Prefers an operator-set URL
+ * (settings.org_logo_url) so a hosted/CDN logo can override; otherwise
+ * falls back to the bundled `public/logo.png` via a filesystem path,
+ * which is more reliable inside a serverless PDF render than a remote
+ * fetch. Returns null if neither is available. */
+function resolveLogoSrc(orgLogoUrl: string | null | undefined): string | null {
+  if (orgLogoUrl && orgLogoUrl.trim()) return orgLogoUrl.trim();
+  const localPath = path.join(process.cwd(), "public", "logo.png");
+  if (fs.existsSync(localPath)) return localPath;
+  return null;
+}
+
 const SYM: Record<Currency, string> = { EUR: "€", USD: "$", GBP: "£" };
 
 // Default labels for the four built-in payment method codes. Custom codes
@@ -131,7 +143,7 @@ export function StatementDocument({ data, settings }: Props) {
       borderBottomWidth: 1,
       borderBottomColor: "#111",
     },
-    logo: { width: 56, height: 56, marginRight: rtl ? 0 : 14, marginLeft: rtl ? 14 : 0 },
+    logo: { width: 64, height: 70, objectFit: "contain", marginRight: rtl ? 0 : 14, marginLeft: rtl ? 14 : 0 },
     headerText: { flex: 1, textAlign: rtl ? "right" : "left" },
     orgName: { fontSize: 16, fontWeight: 700 },
     orgAddress: { fontSize: 9, color: "#555", marginTop: 2 },
@@ -176,10 +188,13 @@ export function StatementDocument({ data, settings }: Props) {
       <Page size="A4" style={styles.page}>
         {/* Header */}
         <View style={styles.header}>
-          {settings.org_logo_url ? (
-            // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf's Image component does not accept alt
-            <Image src={settings.org_logo_url} style={styles.logo} />
-          ) : null}
+          {(() => {
+            const logoSrc = resolveLogoSrc(settings.org_logo_url);
+            return logoSrc ? (
+              // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf's Image component does not accept alt
+              <Image src={logoSrc} style={styles.logo} />
+            ) : null;
+          })()}
           <View style={styles.headerText}>
             <Text style={styles.orgName}>{settings.org_name}</Text>
             {settings.org_address ? (
