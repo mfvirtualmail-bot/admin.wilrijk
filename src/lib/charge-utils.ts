@@ -1,7 +1,33 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { enumerateRoshChodesh } from "./hebrew-date";
+import { HDate } from "@hebcal/core";
+import {
+  enumerateRoshChodesh,
+  gregorianMonthToIndex,
+  getHebrewYear,
+  nextHebrewMonth,
+} from "./hebrew-date";
 import { snapshotEurFields } from "./fx";
 import type { Currency } from "./types";
+
+/**
+ * Academic-year Hebrew-month index (0=Elul..11=Av) → hebcal month number.
+ *   Elul=6, Tishrei=7, Cheshvan=8, Kislev=9, Tevet=10, Shvat=11,
+ *   Adar=12, Nisan=1, Iyar=2, Sivan=3, Tamuz=4, Av=5.
+ * "Adar" is always 12 at this step; callers decide Adar I vs Adar II.
+ */
+const HEB_IDX_TO_HEBCAL = [6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5] as const;
+
+/**
+ * Resolve the stored Gregorian (month, year) back to the Hebrew month the
+ * operator actually picked in the UI. The picker round-trips via
+ * hebrewToGregorian, so gregorianMonthToIndex + getHebrewYear recovers
+ * the original (idx, hebrewYear) pair.
+ */
+function enrollmentToHebrew(gregMonth: number, gregYear: number): { hebcalMonth: number; hebrewYear: number; idx: number } {
+  const idx = gregorianMonthToIndex(gregMonth);
+  const hebrewYear = getHebrewYear(gregYear, gregMonth);
+  return { hebcalMonth: HEB_IDX_TO_HEBCAL[idx], hebrewYear, idx };
+}
 
 /**
  * Generate monthly charges for one student.
@@ -44,15 +70,29 @@ export async function generateChargesForChild(
   if (monthlyTuition <= 0) return 0;
   if (startMonth == null || startYear == null) return 0;
 
-  const startDate = new Date(startYear, startMonth - 1, 1);
+  // The UI picks a Hebrew month; the DB stores the round-tripped Gregorian
+  // (month, year). Build the charge window from Rosh Chodesh boundaries so
+  // e.g. enrollment_start=Elul starts at RC Elul (~Aug 25) instead of
+  // Sep 1, and enrollment_end=Nisan stops before RC Iyar instead of Apr 30.
+  // For Adar in a leap year: start=Adar anchors at Adar I (hebcal 12) so
+  // both Adar I and Adar II get billed; end=Adar advances to Adar II
+  // (hebcal 13) so both are included.
+  const startHeb = enrollmentToHebrew(startMonth, startYear);
+  const startDate = new HDate(1, startHeb.hebcalMonth, startHeb.hebrewYear).greg();
 
-  // Effective end = min(enrollment_end's last day, throughDate ?? today).
   const todayOrThrough = throughDate ?? new Date();
   let effectiveEnd = todayOrThrough;
   if (endMonth != null && endYear != null) {
-    // Last day of the enrollment_end month = day 0 of the next month.
-    const enrollEndLastDay = new Date(endYear, endMonth, 0);
-    if (enrollEndLastDay < effectiveEnd) effectiveEnd = enrollEndLastDay;
+    const endHeb = enrollmentToHebrew(endMonth, endYear);
+    let endHebcal = endHeb.hebcalMonth;
+    if (endHebcal === 12 && HDate.isLeapYear(endHeb.hebrewYear)) {
+      endHebcal = 13; // Adar II — keep both Adar months inside the window.
+    }
+    const after = nextHebrewMonth(endHebcal, endHeb.hebrewYear);
+    const nextRC = new HDate(1, after.hebrewMonth, after.hebrewYear).greg();
+    // Last moment before the next Rosh Chodesh = inclusive end of endMonth.
+    const enrollmentBoundary = new Date(nextRC.getTime() - 1);
+    if (enrollmentBoundary < effectiveEnd) effectiveEnd = enrollmentBoundary;
   }
 
   const roshChodeshList = enumerateRoshChodesh(startDate, effectiveEnd);
