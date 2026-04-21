@@ -103,8 +103,13 @@ export function renderHtmlEmail(
     .map((p) => `<p style="margin:0 0 14px 0;">${escapeHtml(p).replace(/\n/g, "<br/>")}</p>`)
     .join("\n");
 
-  const logo = settings.org_logo_url
-    ? `<img src="${escapeHtml(settings.org_logo_url)}" alt="${escapeHtml(settings.org_name)}" style="height:48px;width:auto;display:block;margin-bottom:8px;" />`
+  // Email recipients need an absolute URL — local paths won't load in Gmail/Outlook.
+  // Prefer operator-set URL; otherwise build one from NEXT_PUBLIC_SITE_URL so the
+  // bundled /logo.png is served from the deployed origin.
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/+$/, "");
+  const logoUrl = settings.org_logo_url?.trim() || (siteUrl ? `${siteUrl}/logo.png` : "");
+  const logo = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(settings.org_name)}" style="height:64px;width:auto;display:block;margin-bottom:8px;" />`
     : "";
 
   const address = settings.org_address
