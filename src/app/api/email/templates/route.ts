@@ -3,11 +3,7 @@ import { createServerClient } from "@/lib/supabase";
 import { getSessionUser } from "@/lib/api-auth";
 import type { EmailTemplate } from "@/lib/types";
 
-// The app ships a single email template. For historical reasons it is
-// stored under locale="yi" in the DB (the column is kept so we don't need a
-// migration). Any other rows are ignored.
-const TEMPLATE_LOCALE = "yi";
-
+/** GET: list all templates, sorted. */
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,31 +13,49 @@ export async function GET() {
   const { data, error } = await db
     .from("email_templates")
     .select("*")
-    .eq("locale", TEMPLATE_LOCALE)
-    .maybeSingle();
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ template: (data as EmailTemplate) ?? null });
+  return NextResponse.json({ templates: (data ?? []) as EmailTemplate[] });
 }
 
-export async function PUT(req: Request) {
+/** POST: create a new template. Body: { name, subject, body, locale?, is_default?, sort_order? } */
+export async function POST(req: Request) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!user.is_super_admin) return NextResponse.json({ error: "Forbidden: super admin only" }, { status: 403 });
 
-  const body = await req.json();
-  const { subject, body: bodyText } = body as { subject: string; body: string };
+  const body = await req.json().catch(() => ({}));
+  const name = (body.name ?? "").trim();
+  const subject = (body.subject ?? "").trim();
+  const bodyText: string = body.body ?? "";
+  const locale = body.locale === "en" ? "en" : "yi";
+  const isDefault = !!body.is_default;
+  const sortOrder = Number.isFinite(body.sort_order) ? Number(body.sort_order) : 100;
 
-  if (!subject?.trim() || !bodyText?.trim()) {
-    return NextResponse.json({ error: "Subject and body are required" }, { status: 400 });
+  if (!name || !subject || !bodyText.trim()) {
+    return NextResponse.json({ error: "Name, subject and body are required" }, { status: 400 });
   }
 
   const db = createServerClient();
-  const { error } = await db
+
+  if (isDefault) {
+    await db.from("email_templates").update({ is_default: false }).eq("is_default", true);
+  }
+
+  const { data, error } = await db
     .from("email_templates")
-    .upsert(
-      { locale: TEMPLATE_LOCALE, subject: subject.trim(), body: bodyText, updated_at: new Date().toISOString() },
-      { onConflict: "locale" }
-    );
+    .insert({
+      name,
+      subject,
+      body: bodyText,
+      locale,
+      is_default: isDefault,
+      sort_order: sortOrder,
+      updated_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ template: data as EmailTemplate });
 }

@@ -195,9 +195,13 @@ export interface EmailSettings {
 }
 
 export interface EmailTemplate {
+  id: string;
+  name: string;
   locale: "en" | "yi";
   subject: string;
   body: string;
+  is_default: boolean;
+  sort_order: number;
   updated_at: string;
 }
 

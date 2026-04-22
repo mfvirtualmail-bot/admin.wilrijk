@@ -16,13 +16,14 @@ export async function GET(req: NextRequest) {
 
   const familyId = req.nextUrl.searchParams.get("familyId");
   if (!familyId) return NextResponse.json({ error: "familyId required" }, { status: 400 });
+  const templateId = req.nextUrl.searchParams.get("templateId");
 
   const db = createServerClient();
   const data = await buildFamilyStatement(db, familyId);
   if (!data) return NextResponse.json({ error: "Family not found" }, { status: 404 });
 
   const settings = await getEmailSettings(db);
-  const template = await getEmailTemplate(db);
+  const template = await getEmailTemplate(db, templateId);
   if (!settings || !template) {
     return NextResponse.json({ error: "Email settings or template not configured" }, { status: 500 });
   }
