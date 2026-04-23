@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS families (
   language VARCHAR(5) NOT NULL DEFAULT 'en',  -- preferred language for emails: en, yi
   notes TEXT,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  -- Opening balance carried over from a previous year (see migration 010).
+  -- Family-level, in families.currency. Rendered as first statement row.
+  opening_balance_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  opening_balance_label TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

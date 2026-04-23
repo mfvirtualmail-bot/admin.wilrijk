@@ -17,23 +17,21 @@ interface Props {
 }
 
 export default function AddPaymentModal({ familyId, familyName, baseCurrency = "EUR", onClose, onSaved }: Props) {
-  const { methodLabels, defaultMethod } = usePaymentMethods();
+  const { methodLabels } = usePaymentMethods();
   const amountRef = useRef<HTMLInputElement>(null);
 
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<Currency>(baseCurrency);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
-  const [method, setMethod] = useState<PaymentMethod>(defaultMethod as PaymentMethod);
+  // No default method — the operator MUST pick one. Empty string = unselected;
+  // Save button is disabled and the form blocks submit until a method is chosen.
+  const [method, setMethod] = useState<PaymentMethod | "">("");
   const [notes, setNotes] = useState("");
   const [showAllocate, setShowAllocate] = useState(false);
   const [month, setMonth] = useState("");
   const [year, setYear] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    setMethod((m) => (m === "kas" ? (defaultMethod as PaymentMethod) : m));
-  }, [defaultMethod]);
 
   useEffect(() => {
     amountRef.current?.focus();
@@ -52,6 +50,7 @@ export default function AddPaymentModal({ familyId, familyName, baseCurrency = "
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!amount || Number(amount) <= 0) { setError("Amount must be greater than 0."); return; }
+    if (!method) { setError("Please select a payment method."); return; }
     setSaving(true);
     setError("");
 
@@ -130,15 +129,20 @@ export default function AddPaymentModal({ familyId, familyName, baseCurrency = "
             </div>
           </div>
 
-          {/* Method */}
+          {/* Method — no default; operator must actively choose one */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Payment Method <span className="text-red-500">*</span>
+            </label>
             <select
               value={method}
-              onChange={(e) => setMethod(e.target.value)}
+              onChange={(e) => setMethod(e.target.value as PaymentMethod | "")}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                method ? "border-gray-300" : "border-red-400 bg-red-50"
+              }`}
             >
+              <option value="">— Select a method —</option>
               {Object.keys(methodLabels).map((m) => (
                 <option key={m} value={m}>{methodLabels[m]}</option>
               ))}
@@ -215,8 +219,9 @@ export default function AddPaymentModal({ familyId, familyName, baseCurrency = "
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
-              disabled={saving}
-              className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm disabled:opacity-50"
+              disabled={saving || !method || !amount || Number(amount) <= 0}
+              className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              title={!method ? "Please select a payment method first" : undefined}
             >
               {saving ? "Saving…" : "Save Payment"}
             </button>
