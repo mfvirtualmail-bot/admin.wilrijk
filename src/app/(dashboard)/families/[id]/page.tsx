@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
@@ -12,6 +12,7 @@ import { familyDisplayName } from "@/lib/family-utils";
 import type { Family, Child, Payment, PaymentMethod, Currency } from "@/lib/types";
 import FxProvenance from "@/components/FxProvenance";
 import HebrewMonthYearPicker from "@/components/HebrewMonthYearPicker";
+import FamilyStatementView from "@/components/FamilyStatementView";
 
 interface FamilyData {
   family: Family;
@@ -38,11 +39,14 @@ function baseYearDefault() {
 export default function FamilyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromSpreadsheet = searchParams.get("from") === "spreadsheet";
   const { user } = useAuth();
   const { methodLabels } = usePaymentMethods();
   const [data, setData] = useState<FamilyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showStatement, setShowStatement] = useState(false);
 
   // Edit family form
   const [editMode, setEditMode] = useState(false);
@@ -294,7 +298,12 @@ export default function FamilyDetailPage() {
     <div>
       <Header titleKey="page.families" />
       <div className="p-6 space-y-6 max-w-4xl">
-        <Link href="/families" className="text-sm text-blue-600 hover:underline block">← Back to families</Link>
+        <Link
+          href={fromSpreadsheet ? "/spreadsheet" : "/families"}
+          className="text-sm text-blue-600 hover:underline block"
+        >
+          ← {fromSpreadsheet ? "Back to spreadsheet" : "Back to families"}
+        </Link>
 
         {/* Balance summary */}
         <div className="grid grid-cols-3 gap-4">
@@ -308,6 +317,20 @@ export default function FamilyDetailPage() {
               <p className={`text-2xl font-bold ${color}`}>{formatCurrency(value)}</p>
             </div>
           ))}
+        </div>
+
+        {/* Full statement (charges + payments) — toggle, off by default */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Full statement (charges + payments)</h2>
+            <button
+              onClick={() => setShowStatement((v) => !v)}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700"
+            >
+              {showStatement ? "Hide statement" : "Show statement"}
+            </button>
+          </div>
+          {showStatement && <FamilyStatementView familyId={id} />}
         </div>
 
         {/* Family info */}
