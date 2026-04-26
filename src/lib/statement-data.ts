@@ -276,6 +276,29 @@ export async function buildFamilyStatement(
 
   const rows: InternalRow[] = Array.from(rowByKey.values()).sort((a, b) => a.key - b.key);
 
+  // ── 2b. Opening balance carried from a previous year (family-level).
+  //    Rendered as the very first row (key=0, sorts before any real Hebrew
+  //    month key = hy*14+pos ≥ 15). FIFO will drain it first for un-hinted
+  //    payments, which matches how operators reconcile prior-year balances.
+  const openingAmount = round2(Number(family.opening_balance_amount ?? 0));
+  if (openingAmount > 0) {
+    const defaultLabel = family.language === "yi" ? "יתרה קודמת" : "Previous balance";
+    const label = (family.opening_balance_label ?? "").trim() || defaultLabel;
+    const openingRow: InternalRow = {
+      key: 0,
+      kind: "charge",
+      month: 0,
+      year: 0,
+      periodLabel: label,
+      totalCharge: openingAmount,
+      children: [],
+      paymentsApplied: [],
+      residual: openingAmount,
+    };
+    rowByKey.set(0, openingRow);
+    rows.unshift(openingRow);
+  }
+
   // ── 3. Convert payments into family currency + sort chronologically.
   const paymentsCcy: PaymentInCcy[] = [];
   let totalPaid = 0;

@@ -51,6 +51,10 @@ export default function EmailsPage() {
   const [sending, setSending] = useState(false);
   const [sendResults, setSendResults] = useState<SendResult[] | null>(null);
 
+  // Templates
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
+  const [templateId, setTemplateId] = useState<string>("");
+
   useEffect(() => {
     // Load families + compute balances by hitting the per-family endpoint in
     // parallel. It's a bit more traffic than a dedicated bulk endpoint but
@@ -97,6 +101,22 @@ export default function EmailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPreviewId]);
 
+  // Load email templates; default to the one flagged is_default.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/email/templates");
+        const d = await r.json();
+        const list = (d.templates ?? []) as Array<{ id: string; name: string; is_default: boolean }>;
+        setTemplates(list);
+        const def = list.find((t) => t.is_default) ?? list[0];
+        if (def) setTemplateId(def.id);
+      } catch {
+        // Non-super-admins get 403 here; picker silently hides.
+      }
+    })();
+  }, []);
+
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
     return families.filter((f) => {
@@ -124,15 +144,23 @@ export default function EmailsPage() {
     });
   }
 
-  async function loadPreview(familyId: string) {
+  async function loadPreview(familyId: string, overrideTemplateId?: string) {
     setPreviewFamilyId(familyId);
     setPreview(null);
     setPreviewLoading(true);
-    const r = await fetch(`/api/email/preview?familyId=${familyId}`);
+    const tid = overrideTemplateId ?? templateId;
+    const qs = tid ? `?familyId=${familyId}&templateId=${tid}` : `?familyId=${familyId}`;
+    const r = await fetch(`/api/email/preview${qs}`);
     const d = await r.json();
     if (r.ok) setPreview(d);
     setPreviewLoading(false);
   }
+
+  // Refresh open preview when the operator switches template.
+  useEffect(() => {
+    if (previewFamilyId && templateId) loadPreview(previewFamilyId, templateId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId]);
 
   async function sendTest() {
     if (!previewFamilyId || !testTo.trim()) return;
@@ -144,6 +172,7 @@ export default function EmailsPage() {
       body: JSON.stringify({
         familyId: previewFamilyId,
         toAddress: testTo.trim(),
+        templateId: templateId || undefined,
       }),
     });
     const d = await r.json().catch(() => ({}));
@@ -153,14 +182,15 @@ export default function EmailsPage() {
 
   async function bulkSend() {
     if (selected.size === 0) return;
-    const label = `Send statement emails to ${selected.size} families?`;
+    const tmplName = templates.find((t) => t.id === templateId)?.name ?? "default";
+    const label = `Send statement emails to ${selected.size} families using template "${tmplName}"?`;
     if (!confirm(label)) return;
     setSending(true);
     setSendResults(null);
     const r = await fetch("/api/email/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ familyIds: Array.from(selected) }),
+      body: JSON.stringify({ familyIds: Array.from(selected), templateId: templateId || undefined }),
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) setSendResults(d.results as SendResult[]);
@@ -256,6 +286,27 @@ export default function EmailsPage() {
                 </ul>
               )}
             </div>
+
+            {templates.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-3 space-y-1">
+                <label className="block text-xs font-medium text-gray-600">Template</label>
+                <select
+                  value={templateId}
+                  onChange={(e) => setTemplateId(e.target.value)}
+                  className="w-full px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {t.is_default ? " (default)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <a href="/settings/email-templates" className="text-[11px] text-blue-600 underline">
+                  Manage templates
+                </a>
+              </div>
+            )}
 
             <button
               type="button"
