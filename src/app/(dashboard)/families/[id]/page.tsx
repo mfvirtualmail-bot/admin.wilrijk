@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth-context";
@@ -12,6 +12,7 @@ import { familyDisplayName } from "@/lib/family-utils";
 import type { Family, Child, Payment, PaymentMethod, Currency } from "@/lib/types";
 import FxProvenance from "@/components/FxProvenance";
 import HebrewMonthYearPicker from "@/components/HebrewMonthYearPicker";
+import FamilyStatementView from "@/components/FamilyStatementView";
 
 interface FamilyData {
   family: Family;
@@ -38,11 +39,14 @@ function baseYearDefault() {
 export default function FamilyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromSpreadsheet = searchParams.get("from") === "spreadsheet";
   const { user } = useAuth();
   const { methodLabels } = usePaymentMethods();
   const [data, setData] = useState<FamilyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showStatement, setShowStatement] = useState(false);
 
   // Edit family form
   const [editMode, setEditMode] = useState(false);
@@ -72,6 +76,11 @@ export default function FamilyDetailPage() {
   // Delete family
   const [deletingFamily, setDeletingFamily] = useState(false);
 
+  // Opening balance (previous-year carryover)
+  const [editOpeningMode, setEditOpeningMode] = useState(false);
+  const [openingForm, setOpeningForm] = useState({ amount: "", label: "" });
+  const [savingOpening, setSavingOpening] = useState(false);
+
   // Add payment form
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [payForm, setPayForm] = useState({
@@ -90,6 +99,10 @@ export default function FamilyDetailPage() {
         if (d.error) { setError(d.error); return; }
         setData(d);
         setForm(d.family);
+        setOpeningForm({
+          amount: String(d.family.opening_balance_amount ?? 0),
+          label: d.family.opening_balance_label ?? "",
+        });
         // Auto-detect next unpaid month
         const paidSet = new Set((d.payments as Payment[]).filter((p) => p.month && p.year).map((p) => `${p.year}-${p.month}`));
         const now = new Date();
@@ -226,6 +239,39 @@ export default function FamilyDetailPage() {
     setSavingChildEdit(false);
   }
 
+  async function handleSaveOpening(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingOpening(true);
+    const amt = Number(openingForm.amount);
+    if (!Number.isFinite(amt) || amt < 0) {
+      alert("Amount must be a non-negative number");
+      setSavingOpening(false);
+      return;
+    }
+    const res = await fetch(`/api/families/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        opening_balance_amount: amt,
+        opening_balance_label: openingForm.label.trim() || null,
+      }),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      setData((prev) => prev ? { ...prev, family: d.family } : prev);
+      setOpeningForm({
+        amount: String(d.family.opening_balance_amount ?? 0),
+        label: d.family.opening_balance_label ?? "",
+      });
+      setEditOpeningMode(false);
+      await loadFamily();
+    } else {
+      const d = await res.json();
+      alert(d.error || "Failed to save opening balance");
+    }
+    setSavingOpening(false);
+  }
+
   async function handleDeleteFamily() {
     if (!confirm(`Delete family "${data?.family.name}"? This cannot be undone.`)) return;
     setDeletingFamily(true);
@@ -294,7 +340,12 @@ export default function FamilyDetailPage() {
     <div>
       <Header titleKey="page.families" />
       <div className="p-6 space-y-6 max-w-4xl">
-        <Link href="/families" className="text-sm text-blue-600 hover:underline block">← Back to families</Link>
+        <Link
+          href={fromSpreadsheet ? "/spreadsheet" : "/families"}
+          className="text-sm text-blue-600 hover:underline block"
+        >
+          ← {fromSpreadsheet ? "Back to spreadsheet" : "Back to families"}
+        </Link>
 
         {/* Balance summary */}
         <div className="grid grid-cols-3 gap-4">
@@ -308,6 +359,20 @@ export default function FamilyDetailPage() {
               <p className={`text-2xl font-bold ${color}`}>{formatCurrency(value)}</p>
             </div>
           ))}
+        </div>
+
+        {/* Full statement (charges + payments) — toggle, off by default */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Full statement (charges + payments)</h2>
+            <button
+              onClick={() => setShowStatement((v) => !v)}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700"
+            >
+              {showStatement ? "Hide statement" : "Show statement"}
+            </button>
+          </div>
+          {showStatement && <FamilyStatementView familyId={id} />}
         </div>
 
         {/* Family info */}
@@ -415,6 +480,100 @@ export default function FamilyDetailPage() {
                 </button>
                 <button type="button" onClick={() => { setEditMode(false); setForm(family); }}
                   className="px-4 py-1.5 border border-gray-300 text-gray-700 rounded-md text-sm hover:bg-gray-50">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+
+        {/* Opening balance (previous-year carryover) */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-lg font-semibold text-gray-900">Opening balance (previous year)</h2>
+            {canEdit && !editOpeningMode && (
+              <button
+                onClick={() => setEditOpeningMode(true)}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                {Number(family.opening_balance_amount ?? 0) > 0 ? "Edit" : "Set"}
+              </button>
+            )}
+          </div>
+          {!editOpeningMode ? (
+            Number(family.opening_balance_amount ?? 0) > 0 ? (
+              <div className="text-sm">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-gray-700">
+                    {family.opening_balance_label?.trim()
+                      || (family.language === "yi" ? "יתרה קודמת" : "Previous balance")}
+                  </span>
+                  <span className="font-semibold text-gray-900">
+                    {formatCurrency(Number(family.opening_balance_amount), (family.currency ?? "EUR") as Currency)}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Appears as the first row on this family&apos;s statement and is paid off first.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">
+                None. Use <em>Set</em> to add a balance carried over from a previous year.
+              </p>
+            )
+          ) : (
+            <form onSubmit={handleSaveOpening} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Amount ({CURRENCY_SYMBOLS[(family.currency ?? "EUR") as Currency]})
+                  </label>
+                  <input
+                    type="number"
+                    value={openingForm.amount}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, amount: e.target.value }))}
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Label (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={openingForm.label}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, label: e.target.value }))}
+                    placeholder={family.language === "yi" ? "יתרה קודמת" : "Previous balance"}
+                    className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                Amount is in this family&apos;s statement currency ({family.currency ?? "EUR"}).
+                Set to 0 to remove the row from the statement.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={savingOpening}
+                  className="px-4 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {savingOpening ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditOpeningMode(false);
+                    setOpeningForm({
+                      amount: String(family.opening_balance_amount ?? 0),
+                      label: family.opening_balance_label ?? "",
+                    });
+                  }}
+                  className="px-4 py-1.5 border border-gray-300 text-gray-700 rounded-md text-sm hover:bg-gray-50"
+                >
                   Cancel
                 </button>
               </div>

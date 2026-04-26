@@ -21,11 +21,31 @@ export async function getEmailSettings(db: SupabaseClient): Promise<EmailSetting
   return data as EmailSettings;
 }
 
-export async function getEmailTemplate(db: SupabaseClient): Promise<EmailTemplate | null> {
-  // The app only ships one template (stored under locale="yi" for legacy
-  // reasons — the column is kept so we don't need a DB migration).
-  const { data } = await db.from("email_templates").select("*").eq("locale", "yi").single();
-  return (data as EmailTemplate) ?? null;
+export async function getEmailTemplate(
+  db: SupabaseClient,
+  templateId?: string | null,
+): Promise<EmailTemplate | null> {
+  if (templateId) {
+    const { data } = await db.from("email_templates").select("*").eq("id", templateId).maybeSingle();
+    if (data) return data as EmailTemplate;
+  }
+  // Fall through to the row marked default.
+  const { data: def } = await db
+    .from("email_templates")
+    .select("*")
+    .eq("is_default", true)
+    .order("sort_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (def) return def as EmailTemplate;
+  // Last resort: any template at all, oldest first.
+  const { data: first } = await db
+    .from("email_templates")
+    .select("*")
+    .order("sort_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return (first as EmailTemplate) ?? null;
 }
 
 /** Build a configured nodemailer transporter. Throws if SMTP creds missing. */

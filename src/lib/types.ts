@@ -57,6 +57,14 @@ export interface Family {
   currency: Currency;
   notes: string | null;
   is_active: boolean;
+  /** Opening balance carried over from a previous year (positive number
+   *  of family.currency owed at the start of this year's records). Stored
+   *  family-level, not tied to any child. Rendered as the first row of
+   *  the statement; drains first under FIFO. */
+  opening_balance_amount: number;
+  /** Optional custom label for the opening-balance row. Falls back to a
+   *  default like "Previous balance" when null/empty. */
+  opening_balance_label: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -195,9 +203,13 @@ export interface EmailSettings {
 }
 
 export interface EmailTemplate {
+  id: string;
+  name: string;
   locale: "en" | "yi";
   subject: string;
   body: string;
+  is_default: boolean;
+  sort_order: number;
   updated_at: string;
 }
 

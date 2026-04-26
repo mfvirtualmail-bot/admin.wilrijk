@@ -30,7 +30,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "SMTP credentials not configured" }, { status: 400 });
   }
 
-  const template = await getEmailTemplate(db);
+  const templateId = typeof body.templateId === "string" ? body.templateId : null;
+  const template = await getEmailTemplate(db, templateId);
   if (!template) {
     return NextResponse.json({ error: "No email template configured" }, { status: 400 });
   }

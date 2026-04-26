@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const familyId: string | undefined = body.familyId;
   const toAddress: string | undefined = body.toAddress;
+  const templateId: string | null = typeof body.templateId === "string" ? body.templateId : null;
 
   if (!familyId || !toAddress) {
     return NextResponse.json({ error: "familyId and toAddress are required" }, { status: 400 });
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "SMTP credentials not configured" }, { status: 400 });
   }
 
-  const template = await getEmailTemplate(db);
+  const template = await getEmailTemplate(db, templateId);
   if (!template) return NextResponse.json({ error: "No email template configured" }, { status: 400 });
 
   const res = await sendFamilyStatement({

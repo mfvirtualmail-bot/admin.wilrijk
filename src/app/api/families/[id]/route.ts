@@ -56,12 +56,31 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     const c = (r.currency ?? "EUR") as Currency;
     if (c === "EUR" || c === "USD" || c === "GBP") currencies.add(c);
   }
+  // Ensure family currency is loaded so we can convert opening balance to EUR.
+  const familyCcy0 = (familyRes.data.currency ?? "EUR") as Currency;
+  if (familyCcy0 === "USD" || familyCcy0 === "GBP") currencies.add(familyCcy0);
   const tables = await loadTablesForCurrencies(db, currencies);
   fillChargeEurInMemory(pastCharges, tables);
   fillPaymentEurInMemory(payments, tables);
 
-  const totalCharged = pastCharges.reduce((s, c) => s + Number(c.eur_amount ?? 0), 0);
+  const chargeEur = pastCharges.reduce((s, c) => s + Number(c.eur_amount ?? 0), 0);
   const totalPaid = payments.reduce((s, p) => s + Number(p.eur_amount ?? 0), 0);
+
+  // Opening balance is stored in family currency; convert to EUR so the
+  // summary cards (always EUR) match the statement totals. No per-row
+  // date exists, so use the latest known rate.
+  const openingLocal = Number(familyRes.data.opening_balance_amount ?? 0);
+  let openingEur = 0;
+  if (openingLocal > 0) {
+    if (familyCcy0 === "EUR") {
+      openingEur = openingLocal;
+    } else {
+      const table = tables.get(familyCcy0);
+      const rate = table?.latest ? Number(table.latest.rate) : null;
+      if (rate && rate > 0) openingEur = openingLocal / rate;
+    }
+  }
+  const totalCharged = chargeEur + openingEur;
 
   return NextResponse.json({
     family: familyRes.data,
@@ -85,6 +104,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const body = await req.json();
   if (body.currency != null && !(body.currency === "EUR" || body.currency === "USD" || body.currency === "GBP")) {
     return NextResponse.json({ error: "Invalid currency" }, { status: 400 });
+  }
+  if (body.opening_balance_amount != null) {
+    const n = Number(body.opening_balance_amount);
+    if (!Number.isFinite(n) || n < 0) {
+      return NextResponse.json({ error: "Invalid opening balance amount" }, { status: 400 });
+    }
+    body.opening_balance_amount = n;
+  }
+  if (body.opening_balance_label != null && typeof body.opening_balance_label !== "string") {
+    return NextResponse.json({ error: "Invalid opening balance label" }, { status: 400 });
   }
   const db = createServerClient();
   const { data, error } = await db
