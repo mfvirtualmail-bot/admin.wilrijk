@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
+import AcademicYearSelector from "@/components/AcademicYearSelector";
 import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, formatEur } from "@/lib/payment-utils";
 import { familyDisplayName } from "@/lib/family-utils";
@@ -35,6 +36,8 @@ export default function ChildrenPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [hebrewYear, setHebrewYear] = useState<number | null>(null);
+  const [includeHidden, setIncludeHidden] = useState(false);
 
   // Delete state
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -42,16 +45,21 @@ export default function ChildrenPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
-    fetch("/api/children")
+    if (hebrewYear == null) return;
+    setLoading(true);
+    const params = new URLSearchParams({ year: String(hebrewYear) });
+    if (includeHidden) params.set("include_hidden", "1");
+    fetch(`/api/children?${params}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) { setError(d.error); return; }
         setChildren(d.children);
         if (d.summary) setSummary(d.summary);
+        setError("");
       })
       .catch(() => setError("Failed to load children"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [hebrewYear, includeHidden]);
 
   const filtered = children.filter((c) => {
     const q = search.toLowerCase();
@@ -155,6 +163,15 @@ export default function ChildrenPage() {
     <div>
       <Header titleKey="page.children" />
       <div className="p-6">
+        <div className="flex flex-wrap gap-3 items-center mb-4 pb-3 border-b border-gray-200">
+          <AcademicYearSelector
+            value={hebrewYear}
+            onChange={setHebrewYear}
+            includeHidden={includeHidden}
+            onIncludeHiddenChange={setIncludeHidden}
+            compact
+          />
+        </div>
         <div className="flex flex-wrap gap-3 items-center mb-6">
           <input type="text" placeholder="Search by name, family or class…" value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -180,6 +197,9 @@ export default function ChildrenPage() {
           >
             Export Excel
           </button>
+          <Link href="/charges/manual" className="px-4 py-2 border border-amber-500 text-amber-700 rounded-md hover:bg-amber-50 font-medium text-sm">
+            Record Historical Charge
+          </Link>
           <Link href="/families/new" className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm">
             + New Family
           </Link>

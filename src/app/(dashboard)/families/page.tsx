@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
+import AcademicYearSelector from "@/components/AcademicYearSelector";
 import { useAuth } from "@/lib/auth-context";
 import { exportToExcel, exportTimestamp } from "@/lib/export-utils";
 import { formatEur } from "@/lib/payment-utils";
@@ -21,6 +22,8 @@ export default function FamiliesPage() {
   const [openBalanceOnly, setOpenBalanceOnly] = useState(
     searchParams.get("filter") === "open-balance",
   );
+  const [hebrewYear, setHebrewYear] = useState<number | null>(null);
+  const [includeHidden, setIncludeHidden] = useState(false);
 
   // Delete state
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -28,17 +31,19 @@ export default function FamiliesPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
-    // cache:'no-store' so browser HTTP cache can't serve a stale balance
-    // after charges are regenerated or a re-snapshot changes totals.
-    fetch("/api/families", { cache: "no-store" })
+    if (hebrewYear == null) return;
+    setLoading(true);
+    const params = new URLSearchParams({ year: String(hebrewYear) });
+    if (includeHidden) params.set("include_hidden", "1");
+    fetch(`/api/families?${params}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         if (d.error) setError(d.error);
-        else setFamilies(d.families);
+        else { setFamilies(d.families); setError(""); }
       })
       .catch(() => setError("Failed to load families"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [hebrewYear, includeHidden]);
 
   const filtered = families.filter((f) => {
     if (openBalanceOnly && !((f.balance_eur ?? 0) > 0)) return false;
@@ -143,6 +148,16 @@ export default function FamiliesPage() {
     <div>
       <Header titleKey="page.families" />
       <div className="p-6">
+        {/* Year filter row */}
+        <div className="flex flex-wrap gap-3 items-center mb-4 pb-3 border-b border-gray-200">
+          <AcademicYearSelector
+            value={hebrewYear}
+            onChange={setHebrewYear}
+            includeHidden={includeHidden}
+            onIncludeHiddenChange={setIncludeHidden}
+            compact
+          />
+        </div>
         {/* Toolbar */}
         <div className="flex flex-wrap gap-3 items-center mb-6">
           <input
