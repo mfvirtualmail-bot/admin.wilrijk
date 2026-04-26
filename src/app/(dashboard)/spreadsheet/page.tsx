@@ -14,8 +14,9 @@ import {
 } from "ag-grid-community";
 import Header from "@/components/Header";
 import AddPaymentModal from "@/components/AddPaymentModal";
+import AcademicYearSelector from "@/components/AcademicYearSelector";
 import { CURRENCY_SYMBOLS, formatCurrency } from "@/lib/payment-utils";
-import { academicYearLabel } from "@/lib/hebrew-date";
+import { hebrewYearToLetters } from "@/lib/hebrew-date";
 import type { Currency } from "@/lib/types";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -79,22 +80,31 @@ export default function SpreadsheetPage() {
   const [rowData, setRowData] = useState<SpreadsheetRow[]>([]);
   const [months, setMonths] = useState<MonthMeta[]>([]);
   const [academicYear, setAcademicYear] = useState<number>(0);
+  const [hebrewYear, setHebrewYear] = useState<number | null>(null);
+  const [isPastYear, setIsPastYear] = useState(false);
+  const [includeHidden, setIncludeHidden] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modalFamily, setModalFamily] = useState<SpreadsheetRow | null>(null);
 
   const loadData = useCallback(() => {
-    fetch("/api/spreadsheet")
+    if (hebrewYear == null) return;
+    setLoading(true);
+    const params = new URLSearchParams({ year: String(hebrewYear) });
+    if (includeHidden) params.set("include_hidden", "1");
+    fetch(`/api/spreadsheet?${params}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) { setError(d.error); return; }
         setRowData(d.rows);
         setMonths(d.months);
         setAcademicYear(d.academicYear);
+        setIsPastYear(!!d.isPastYear);
+        setError("");
       })
       .catch(() => setError("Failed to load spreadsheet data"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [hebrewYear, includeHidden]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -103,8 +113,9 @@ export default function SpreadsheetPage() {
   const columnDefs = useMemo<(ColDef | ColGroupDef)[]>(() => {
     if (!months.length) return [];
 
-    const cols: (ColDef | ColGroupDef)[] = [
-      {
+    const cols: (ColDef | ColGroupDef)[] = [];
+    if (!isPastYear) {
+      cols.push({
         headerName: "",
         field: "_addPayment",
         pinned: "left",
@@ -114,17 +125,17 @@ export default function SpreadsheetPage() {
         filter: false,
         cellRenderer: AddPaymentButtonRenderer,
         cellRendererParams: { onAdd: (row: SpreadsheetRow) => setModalFamily(row) },
-      },
-      {
-        field: "familyName",
-        headerName: "Family",
-        pinned: "left",
-        width: 170,
-        editable: false,
-        cellStyle: { fontWeight: "600" },
-        filter: true,
-      },
-    ];
+      });
+    }
+    cols.push({
+      field: "familyName",
+      headerName: "Family",
+      pinned: "left",
+      width: 170,
+      editable: false,
+      cellStyle: { fontWeight: "600" },
+      filter: true,
+    });
 
     for (const { hebrewLabel, key } of months) {
       cols.push({
@@ -234,7 +245,7 @@ export default function SpreadsheetPage() {
     );
 
     return cols;
-  }, [months]);
+  }, [months, isPastYear]);
 
   const defaultColDef = useMemo<ColDef>(() => ({
     sortable: false,
@@ -271,8 +282,9 @@ export default function SpreadsheetPage() {
 
     const ws = utils.aoa_to_sheet(wsData);
     const wb = utils.book_new();
-    utils.book_append_sheet(wb, ws, `${academicYear}-${academicYear + 1}`);
-    writeFile(wb, `tuition-${academicYear}-${academicYear + 1}.xlsx`);
+    const yearLabel = hebrewYear ? hebrewYearToLetters(hebrewYear) : `${academicYear}-${academicYear + 1}`;
+    utils.book_append_sheet(wb, ws, yearLabel);
+    writeFile(wb, `tuition-${yearLabel}.xlsx`);
   }
 
   const paidByCur = new Map<Currency, number>();
@@ -292,9 +304,18 @@ export default function SpreadsheetPage() {
       <Header titleKey="page.spreadsheet" />
 
       <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200 text-sm flex-wrap">
-        <span className="font-semibold text-gray-700" dir="rtl">
-          {academicYear ? academicYearLabel(academicYear) : ""}
-        </span>
+        <AcademicYearSelector
+          value={hebrewYear}
+          onChange={setHebrewYear}
+          includeHidden={includeHidden}
+          onIncludeHiddenChange={setIncludeHidden}
+          compact
+        />
+        {isPastYear && (
+          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-medium" dir="rtl">
+            צפייה בלבד - שנה שעברה
+          </span>
+        )}
         <span className="text-gray-400">|</span>
         <span className="text-gray-600">{rowData.length} families</span>
         <span className="text-gray-600">Total paid: <strong className="text-green-700">{fmtTotals(paidByCur)}</strong></span>

@@ -3,8 +3,22 @@ import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { generateChargesForChild } from "@/lib/charge-utils";
-import { convertManyToEur } from "@/lib/fx";
-import type { Currency } from "@/lib/types";
+import {
+  convertManyToEur,
+  loadTablesForCurrencies,
+  fillPaymentEurInMemory,
+  fillChargeEurInMemory,
+  type PaymentEurRow,
+  type ChargeEurRow,
+} from "@/lib/fx";
+import {
+  familyChargedInYear,
+  familyPaidInYear,
+  hebrewMonthsBilledInYear,
+  isChildEnrolledInYear,
+  isShortStayPaidHidden,
+} from "@/lib/academic-year";
+import type { Child, Charge, Currency, Payment } from "@/lib/types";
 
 async function getSessionUser() {
   const token = cookies().get("session")?.value;
@@ -22,6 +36,9 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const familyId = searchParams.get("family_id");
+  const yearParam = searchParams.get("year");
+  const includeHidden = searchParams.get("include_hidden") === "1";
+  const hebrewYear = yearParam ? Number(yearParam) : null;
 
   const db = createServerClient();
   let query = db
@@ -30,14 +47,68 @@ export async function GET(req: NextRequest) {
     .order("last_name");
   if (familyId) query = query.eq("family_id", familyId);
 
-  const { data, error } = await query;
+  const { data: childrenData, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Convert the active children's monthly tuitions to EUR at today's rate
-  // so the page can show a meaningful combined total even when families
-  // are billed in different currencies.
+  let visibleChildren = (childrenData ?? []) as Array<Child & { families: { name: string; father_name: string | null } | null }>;
+
+  // Per-year filter. Apply only when a year is requested.
+  if (hebrewYear != null) {
+    const [chargesRes, paymentsRes] = await Promise.all([
+      db.from("charges").select("id, family_id, child_id, amount, currency, month, year, hebrew_month, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
+      db.from("payments").select("id, family_id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
+    ]);
+    const allCharges = (chargesRes.data ?? []) as Array<ChargeEurRow & Pick<Charge, "family_id" | "child_id" | "month" | "year" | "hebrew_month">>;
+    const allPayments = (paymentsRes.data ?? []) as Array<PaymentEurRow & Pick<Payment, "family_id" | "payment_date">>;
+
+    const ccySet = new Set<Currency>();
+    for (const r of allCharges) {
+      const c = (r.currency ?? "EUR") as Currency;
+      if (c === "EUR" || c === "USD" || c === "GBP") ccySet.add(c);
+    }
+    for (const r of allPayments) {
+      const c = (r.currency ?? "EUR") as Currency;
+      if (c === "EUR" || c === "USD" || c === "GBP") ccySet.add(c);
+    }
+    const tables = await loadTablesForCurrencies(db, ccySet);
+    fillChargeEurInMemory(allCharges, tables);
+    fillPaymentEurInMemory(allPayments, tables);
+
+    const chargesByFamily = new Map<string, typeof allCharges>();
+    for (const c of allCharges) {
+      const b = chargesByFamily.get(c.family_id) ?? [];
+      b.push(c);
+      chargesByFamily.set(c.family_id, b);
+    }
+    const chargesByChild = new Map<string, typeof allCharges>();
+    for (const c of allCharges) {
+      if (!c.child_id) continue;
+      const b = chargesByChild.get(c.child_id) ?? [];
+      b.push(c);
+      chargesByChild.set(c.child_id, b);
+    }
+    const paymentsByFamily = new Map<string, typeof allPayments>();
+    for (const p of allPayments) {
+      const b = paymentsByFamily.get(p.family_id) ?? [];
+      b.push(p);
+      paymentsByFamily.set(p.family_id, b);
+    }
+
+    visibleChildren = visibleChildren.filter((ch) => {
+      if (!isChildEnrolledInYear(ch, hebrewYear)) return false;
+      if (includeHidden) return true;
+      const charged = familyChargedInYear(chargesByFamily.get(ch.family_id) ?? [], hebrewYear);
+      const paid = familyPaidInYear(paymentsByFamily.get(ch.family_id) ?? [], hebrewYear);
+      const months = hebrewMonthsBilledInYear(chargesByChild.get(ch.id) ?? [], hebrewYear);
+      return !isShortStayPaidHidden(months, charged - paid);
+    });
+  }
+
+  // Convert each student's monthly tuition to EUR at today's rate so the
+  // page can show a meaningful combined total even when families are
+  // billed in different currencies. Only includes active students.
   const today = new Date().toISOString().slice(0, 10);
-  const active = (data ?? []).filter((c) => c.is_active);
+  const active = visibleChildren.filter((c) => c.is_active);
   const conv = await convertManyToEur(
     active.map((c) => ({
       id: c.id as string,
@@ -66,7 +137,7 @@ export async function GET(req: NextRequest) {
   }));
 
   return NextResponse.json({
-    children: data,
+    children: visibleChildren,
     summary: {
       totalMonthlyEur: conv.totalEur,
       missing: conv.missing.length,
