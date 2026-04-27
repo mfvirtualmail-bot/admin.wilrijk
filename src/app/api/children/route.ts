@@ -55,10 +55,10 @@ export async function GET(req: NextRequest) {
   // Per-year filter. Apply only when a year is requested.
   if (hebrewYear != null) {
     const [chargesRes, paymentsRes] = await Promise.all([
-      db.from("charges").select("id, family_id, child_id, amount, currency, month, year, hebrew_month, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
+      db.from("charges").select("id, family_id, child_id, amount, currency, month, year, hebrew_month, hebrew_year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
       db.from("payments").select("id, family_id, amount, currency, payment_date, eur_amount, eur_rate, eur_rate_date, eur_rate_kind"),
     ]);
-    const allCharges = (chargesRes.data ?? []) as Array<ChargeEurRow & Pick<Charge, "family_id" | "child_id" | "month" | "year" | "hebrew_month">>;
+    const allCharges = (chargesRes.data ?? []) as Array<ChargeEurRow & Pick<Charge, "family_id" | "child_id" | "month" | "year" | "hebrew_month" | "hebrew_year">>;
     const allPayments = (paymentsRes.data ?? []) as Array<PaymentEurRow & Pick<Payment, "family_id" | "payment_date">>;
 
     const ccySet = new Set<Currency>();

@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { hebrewMonthLabel } from "@/lib/hebrew-date";
+import { hebrewMonthLabelFromHebrew } from "@/lib/hebrew-date";
 import { buildFamilyStatement } from "@/lib/statement-data";
 import { loadTablesForCurrencies } from "@/lib/fx";
 import {
   academicYearMonths,
   currentAcademicYear,
+  chargeInAcademicYear,
   familyChargedInYear,
   familyPaidInYear,
-  gregInAcademicYear,
   isChildEnrolledInYear,
   hebrewMonthsBilledInYear,
   isShortStayPaidHidden,
@@ -30,6 +30,13 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+/** Cell key. Uses Hebrew identity so it matches the canonical
+ *  charge key (`hebrew_month`, `hebrew_year`) and never drifts
+ *  against the Gregorian Rosh-Chodesh date stored on each row. */
+function cellKey(hebrewMonth: number, hebrewYear: number): string {
+  return `hk_${hebrewMonth}_${hebrewYear}`;
+}
+
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -39,8 +46,6 @@ export async function GET(req: NextRequest) {
 
   const db = createServerClient();
 
-  // Year + visibility params. Default = current Hebrew academic year,
-  // hide short-stay-paid students (user's default-current-year rule).
   const { searchParams } = new URL(req.url);
   const yearParam = searchParams.get("year");
   const includeHidden = searchParams.get("include_hidden") === "1";
@@ -50,9 +55,6 @@ export async function GET(req: NextRequest) {
 
   const months = academicYearMonths(hebrewYear);
 
-  // Bulk-load everything. Same shape as the pre-multi-year implementation
-  // — we just filter per-family afterward by academic year instead of
-  // showing every family unconditionally.
   const [familiesRes, childrenRes, chargesRes, paymentsRes] = await Promise.all([
     db.from("families").select("*").order("name"),
     db.from("children").select("*"),
@@ -112,8 +114,6 @@ export async function GET(req: NextRequest) {
     paymentsByFamily.set(p.family_id, bucket);
   }
 
-  // Build statements once per family (same as before — FIFO allocation
-  // lives there). We still slice by academic year afterward.
   const statements = await Promise.all(
     families.map(async (family) => {
       try {
@@ -131,10 +131,6 @@ export async function GET(req: NextRequest) {
     })
   );
 
-  // Filter families to those with at least one child visible for this
-  // academic year. The filter uses the charges table for "short-stay
-  // paid" detection (Elul+Tishrei only), and the family-level per-year
-  // balance to decide whether to hide.
   const visibleRows = families
     .map((family, i) => {
       const stmt = statements[i];
@@ -144,13 +140,10 @@ export async function GET(req: NextRequest) {
       const famPayments = paymentsByFamily.get(family.id) ?? [];
       const famChildren = childrenByFamily.get(family.id) ?? [];
 
-      // Compute per-year balance once so every per-child visibility
-      // check shares the same balance number.
       const chargedYear = familyChargedInYear(famCharges, hebrewYear);
       const paidYear = familyPaidInYear(famPayments, hebrewYear);
       const balanceYear = chargedYear - paidYear;
 
-      // Is any child in this family visible for this year?
       let anyVisible = false;
       for (const ch of famChildren) {
         if (!isChildEnrolledInYear(ch, hebrewYear)) continue;
@@ -167,26 +160,39 @@ export async function GET(req: NextRequest) {
         amount: number | null;
         currency: Currency | null;
         notes: string | null;
+        /** Charge owed in this Hebrew month, in family currency. Used to
+         *  paint "open" cells for months that have a charge but no
+         *  payment yet — without this, an unpaid trailing month rendered
+         *  as a blank cell instead of an obvious red one. */
+        chargeAmount: number | null;
+        /** Remaining residual after FIFO allocation, in family currency.
+         *  A cell is "fully paid" iff residual is ~0. */
+        residual: number | null;
       }> = {};
 
-      for (const { month, year } of months) {
-        const monthKey = `m_${month}_${year}`;
-        monthData[monthKey] = { paymentId: null, date: null, method: null, amount: null, currency: null, notes: null };
+      for (const { hebrewMonth, hebrewYear: hy } of months) {
+        monthData[cellKey(hebrewMonth, hy)] = {
+          paymentId: null, date: null, method: null, amount: null,
+          currency: null, notes: null, chargeAmount: null, residual: null,
+        };
       }
 
       let monthlyTuition = 0;
 
       if (stmt) {
-        // Reference "monthly" amount — pulled from this year's charges when
-        // possible so past-year spreadsheets don't mis-flag cells against
-        // today's tuition.
+        // Reference "monthly" amount — pulled from this year's charges so
+        // past-year spreadsheets don't mis-flag cells against today's
+        // tuition. Keys by Hebrew identity, matching the academic-year filter.
         const inYearTotals = stmt.rows
-          .filter((r) => r.kind === "charge" && r.totalCharge > 0 && gregInAcademicYear(r.month, r.year, hebrewYear))
+          .filter((r) =>
+            r.kind === "charge" &&
+            r.totalCharge > 0 &&
+            chargeInAcademicYear(r.hebrewMonth, r.hebrewYear, hebrewYear),
+          )
           .map((r) => r.totalCharge);
         if (inYearTotals.length > 0) {
           monthlyTuition = inYearTotals[inYearTotals.length - 1];
         } else {
-          // Fall back to the most recent real charge if nothing in this year.
           const realTotals = stmt.rows
             .filter((r) => r.kind === "charge" && r.totalCharge > 0)
             .map((r) => r.totalCharge);
@@ -194,28 +200,32 @@ export async function GET(req: NextRequest) {
         }
 
         for (const row of stmt.rows) {
-          const monthKey = `m_${row.month}_${row.year}`;
-          if (!(monthKey in monthData)) continue;
-          const frags = row.paymentsApplied;
-          if (frags.length === 0) continue;
+          const key = cellKey(row.hebrewMonth, row.hebrewYear);
+          if (!(key in monthData)) continue;
 
+          const frags = row.paymentsApplied;
           const sum = frags.reduce((s, f) => s + f.amount, 0);
           const first = frags[0];
           const methods = new Set(frags.map((f) => f.method));
 
-          monthData[monthKey] = {
+          monthData[key] = {
             paymentId: frags.length === 1 ? first.paymentId : null,
-            date: first.paymentDate,
-            method: methods.size === 1 ? first.method : "multi",
-            amount: round2(sum),
+            date: first?.paymentDate ?? null,
+            method:
+              frags.length === 0
+                ? null
+                : methods.size === 1
+                ? first.method
+                : "multi",
+            amount: frags.length === 0 ? null : round2(sum),
             currency: base,
             notes: frags.length > 1 ? `${frags.length} payments` : null,
+            chargeAmount: row.totalCharge > 0 ? round2(row.totalCharge) : null,
+            residual: round2(row.residual),
           };
         }
       }
 
-      // Per-year totals — independent of FIFO, computed from raw charges
-      // + payments whose date falls in this year's Gregorian window.
       const totalCharged = chargedYear;
       const totalPaid = paidYear;
       const balance = balanceYear;
@@ -239,9 +249,15 @@ export async function GET(req: NextRequest) {
     hebrewYear,
     isPastYear,
     months: months.map((m) => ({
-      ...m,
-      key: `m_${m.month}_${m.year}`,
-      hebrewLabel: hebrewMonthLabel(m.month, m.year),
+      hebrewMonth: m.hebrewMonth,
+      hebrewYear: m.hebrewYear,
+      // Kept for back-compat with the Excel exporter and any client code
+      // that still references {month, year}. These now represent the
+      // Gregorian date of Rosh Chodesh, not a civil-month label.
+      month: m.gregMonth,
+      year: m.gregYear,
+      key: cellKey(m.hebrewMonth, m.hebrewYear),
+      hebrewLabel: hebrewMonthLabelFromHebrew(m.hebrewMonth, m.hebrewYear),
     })),
   });
 }

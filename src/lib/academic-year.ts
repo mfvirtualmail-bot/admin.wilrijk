@@ -1,24 +1,30 @@
-import { hebrewYearToLetters } from "./hebrew-date";
+import { HDate } from "@hebcal/core";
+import { hebrewYearToLetters, nextHebrewMonth } from "./hebrew-date";
 import type { Charge, Child } from "./types";
 
 /**
  * Multi-year support for the app.
  *
  * An "academic year" is identified by its Hebrew year number (e.g. 5786
- * = תשפ״ו). Its Gregorian window runs from Sep 1 of (hebrewYear - 3761)
- * through Aug 31 of (hebrewYear - 3760).
+ * = תשפ״ו). It runs from Elul of (hebrewYear - 1) through Av of hebrewYear
+ * — twelve Hebrew months, or thirteen in Hebrew leap years (Adar II is
+ * inserted between Adar I and Nisan).
  *
- *   e.g. hebrewYear 5786 = Sep 1 2025 → Aug 31 2026.
+ * Hebrew identity (`hebrew_month`, `hebrew_year`) is the canonical key
+ * everywhere in the app: charges store it, statements key rows by it,
+ * the spreadsheet grid columns are enumerated from it. The Gregorian
+ * (`charges.month`, `charges.year`) pair is the Rosh Chodesh date of
+ * each row — used only for FX snapshots and "is this charge in the
+ * past" checks. It is NEVER a join key for academic-year filtering.
  *
- * The first two Hebrew months of an academic year are:
- *   - Elul of (hebrewYear - 1)      — hebcal month 6, before Rosh Hashana
- *   - Tishrei of  hebrewYear        — hebcal month 7, after  Rosh Hashana
+ * That single rule is what fixed the spreadsheet drift bug: the academic
+ * year window had been a civil Sep→Aug Gregorian range, which dropped
+ * Rosh-Chodesh-dated rows whose Gregorian month landed in the previous
+ * civil month (Elul → late August, Tishrei → late September, …).
  *
- * A "short-stay paid" child is one who was only billed during those two
- * months AND whose family has no open balance for that year. These are
- * hidden from default views per user request — the goal is to keep the
- * current-year spreadsheet clean of students who only overlapped for a
- * couple of months before moving on and have already settled up.
+ * A "short-stay paid" child is one who was only billed during Elul (6)
+ * and/or Tishrei (7) of an academic year AND whose family has no open
+ * balance for that year. These are hidden from default views.
  */
 
 export interface AcademicYear {
@@ -41,39 +47,79 @@ export function academicYearFromHebrew(hebrewYear: number): AcademicYear {
 }
 
 export function currentAcademicYear(today: Date = new Date()): AcademicYear {
-  const month = today.getMonth() + 1;
-  const year = today.getFullYear();
-  const hy = month >= 9 ? year + 3761 : year + 3760;
-  return academicYearFromHebrew(hy);
+  // The academic year flips at Rosh Chodesh Elul, not at September 1.
+  // RC Elul falls in late August in every Hebrew year (~Aug 25–Sep 1),
+  // so we use the actual Hebrew identity of `today` to decide.
+  const hd = new HDate(today);
+  const hm = hd.getMonth();    // hebcal: 1..13
+  const hy = hd.getFullYear();
+  // Elul (6) of year H opens academic year (H + 1).
+  // Anything else in year H belongs to academic year H.
+  const academicHy = hm === 6 ? hy + 1 : hy;
+  return academicYearFromHebrew(academicHy);
 }
 
-export function gregInAcademicYear(month: number, year: number, hebrewYear: number): boolean {
-  const startYear = hebrewYear - 3761;
-  const endYear = hebrewYear - 3760;
-  if (year === startYear && month >= 9) return true;
-  if (year === endYear && month <= 8) return true;
+/** True iff a charge with the given Hebrew identity belongs to academic year `hy`. */
+export function chargeInAcademicYear(
+  hebrewMonth: number | null | undefined,
+  hebrewYear: number | null | undefined,
+  hy: number,
+): boolean {
+  if (hebrewMonth == null || hebrewYear == null) return false;
+  // Elul of (hy - 1) is the FIRST month of academic year hy.
+  if (hebrewMonth === 6 && hebrewYear === hy - 1) return true;
+  // Every other Hebrew month of year hy belongs to academic year hy
+  // EXCEPT Elul, which already belongs to the next academic year.
+  if (hebrewMonth !== 6 && hebrewYear === hy) return true;
   return false;
 }
 
-export function dateInAcademicYear(iso: string, hebrewYear: number): boolean {
+/** True iff a Gregorian-dated payment falls within academic year `hy`. */
+export function dateInAcademicYear(iso: string | null | undefined, hy: number): boolean {
   if (!iso || iso.length < 10) return false;
   const y = Number(iso.slice(0, 4));
   const m = Number(iso.slice(5, 7));
-  if (!Number.isFinite(y) || !Number.isFinite(m)) return false;
-  return gregInAcademicYear(m, y, hebrewYear);
+  const d = Number(iso.slice(8, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return false;
+  const hd = new HDate(new Date(y, m - 1, d));
+  return chargeInAcademicYear(hd.getMonth(), hd.getFullYear(), hy);
+}
+
+export interface AcademicMonth {
+  hebrewMonth: number;        // hebcal numbering: 1..13
+  hebrewYear: number;
+  /** Gregorian (month, year) of Rosh Chodesh — for FX anchoring + display. */
+  gregMonth: number;
+  gregYear: number;
 }
 
 /**
- * Returns the 12 Gregorian (month, year) pairs in academic year Y,
- * starting with Sep and ending with Aug.
+ * Returns the Hebrew months of academic year `hy` in chronological order:
+ * Elul (hy-1), Tishrei (hy), Cheshvan, …, Av (hy). Twelve entries in a
+ * non-leap year; thirteen when `hy` is a Hebrew leap year (Adar II is
+ * inserted between Adar I and Nisan).
  */
-export function academicYearMonths(hebrewYear: number): Array<{ month: number; year: number }> {
-  const startYear = hebrewYear - 3761;
-  return [
-    { month: 9, year: startYear }, { month: 10, year: startYear }, { month: 11, year: startYear }, { month: 12, year: startYear },
-    { month: 1, year: startYear + 1 }, { month: 2, year: startYear + 1 }, { month: 3, year: startYear + 1 }, { month: 4, year: startYear + 1 },
-    { month: 5, year: startYear + 1 }, { month: 6, year: startYear + 1 }, { month: 7, year: startYear + 1 }, { month: 8, year: startYear + 1 },
-  ];
+export function academicYearMonths(hy: number): AcademicMonth[] {
+  const out: AcademicMonth[] = [];
+  let hm = 6;          // Elul
+  let hyc = hy - 1;
+  // We stop after Av (hebcal month 5) of year hy. Walking forward via
+  // nextHebrewMonth handles the year rollover at Elul→Tishrei and the
+  // leap-year Adar II automatically.
+  for (let i = 0; i < 14; i++) {
+    const greg = new HDate(1, hm, hyc).greg();
+    out.push({
+      hebrewMonth: hm,
+      hebrewYear: hyc,
+      gregMonth: greg.getMonth() + 1,
+      gregYear: greg.getFullYear(),
+    });
+    if (hm === 5 && hyc === hy) break;
+    const nxt = nextHebrewMonth(hm, hyc);
+    hm = nxt.hebrewMonth;
+    hyc = nxt.hebrewYear;
+  }
+  return out;
 }
 
 /**
@@ -92,30 +138,34 @@ export function listAcademicYears(earliestHebrewYear: number, today: Date = new 
 
 /**
  * Convert an `enrollment_start_year` (Gregorian) to the Hebrew year
- * of the academic year that starts in that September. E.g. enrollment
- * starting Aug 2020 is academic year 5781 (Sep 2020 → Aug 2021), so we
- * pass 2020 and get 5781.
+ * of the academic year that starts in that September.
  */
 export function earliestHebrewYearFromGregorian(earliestGregEnrollmentYear: number): number {
   return earliestGregEnrollmentYear + 3761;
 }
 
 /**
- * Does the child's (enrollment_start..enrollment_end) window overlap
- * academic year Y at all? Answers the "is this student in year Y" question
- * without needing charges rows to exist yet.
+ * Does the child's enrollment window overlap academic year `hy` at all?
+ * Compares the start/end keys (year*12 + month) against the academic year
+ * window expressed in the same units. The window edges use Rosh Chodesh
+ * dates: RC Elul of (hy-1) = ~late Aug, RC Elul of hy = ~late Aug + ~12mo.
  */
 export function isChildEnrolledInYear(
   child: Pick<Child, "enrollment_start_month" | "enrollment_start_year" | "enrollment_end_month" | "enrollment_end_year">,
-  hebrewYear: number,
+  hy: number,
 ): boolean {
   const sm = child.enrollment_start_month;
   const sy = child.enrollment_start_year;
   const em = child.enrollment_end_month;
   const ey = child.enrollment_end_year;
   if (sm == null || sy == null) return false;
-  const yearStart = (hebrewYear - 3761) * 12 + 9;
-  const yearEnd = (hebrewYear - 3760) * 12 + 8;
+  // Window: from RC Elul (hy-1) to the day before RC Elul (hy).
+  const elulPrev = new HDate(1, 6, hy - 1).greg();
+  const elulCur = new HDate(1, 6, hy).greg();
+  const yearStart = elulPrev.getFullYear() * 12 + (elulPrev.getMonth() + 1);
+  // Last billable month is the Gregorian month containing RC of Av (hy),
+  // i.e. the month BEFORE elulCur.
+  const yearEnd = elulCur.getFullYear() * 12 + elulCur.getMonth();
   const enrollStart = sy * 12 + sm;
   const enrollEnd = em != null && ey != null ? ey * 12 + em : Number.POSITIVE_INFINITY;
   return enrollEnd >= yearStart && enrollStart <= yearEnd;
@@ -123,18 +173,17 @@ export function isChildEnrolledInYear(
 
 /**
  * The set of hebcal-month numbers the student was actually billed for
- * during academic year Y. Elul = 6, Tishrei = 7. Uses the `charges` table
- * as the source of truth — if charges haven't been generated yet this
- * returns an empty set, and the visibility rule treats that as "don't
- * hide" (safe default).
+ * during academic year `hy`. Reads the canonical `hebrew_month` /
+ * `hebrew_year` columns. Returns an empty set when the student has no
+ * charges yet — visibility logic treats that as "don't hide" (safe default).
  */
 export function hebrewMonthsBilledInYear(
-  childCharges: Array<Pick<Charge, "month" | "year" | "hebrew_month">>,
-  hebrewYear: number,
+  childCharges: Array<Pick<Charge, "hebrew_month" | "hebrew_year">>,
+  hy: number,
 ): Set<number> {
   const set = new Set<number>();
   for (const c of childCharges) {
-    if (!gregInAcademicYear(c.month, c.year, hebrewYear)) continue;
+    if (!chargeInAcademicYear(c.hebrew_month, c.hebrew_year, hy)) continue;
     if (c.hebrew_month != null) set.add(c.hebrew_month);
   }
   return set;
@@ -147,21 +196,21 @@ export function isOnlyElulTishrei(hebcalMonths: Set<number>): boolean {
   return ok;
 }
 
-/** Loose shape for the EUR-aware rows used by these aggregations.
- *  `eur_amount` is marked optional so callers can pass a plain `Charge`
- *  / `Payment` (whose compile-time type lacks the EUR snapshot fields
- *  even though the DB column exists at runtime) without having to cast. */
-export type YearChargeRow = { month: number; year: number; eur_amount?: number | null };
+/** Loose shape for the EUR-aware rows used by these aggregations. */
+export type YearChargeRow = {
+  hebrew_month?: number | null;
+  hebrew_year?: number | null;
+  eur_amount?: number | null;
+};
 export type YearPaymentRow = { payment_date: string; eur_amount?: number | null };
-export type YearChargeWithHebrew = YearChargeRow & { hebrew_month: number | null };
 
 export function familyChargedInYear(
   familyCharges: Array<YearChargeRow>,
-  hebrewYear: number,
+  hy: number,
 ): number {
   let s = 0;
   for (const c of familyCharges) {
-    if (!gregInAcademicYear(c.month, c.year, hebrewYear)) continue;
+    if (!chargeInAcademicYear(c.hebrew_month, c.hebrew_year, hy)) continue;
     s += Number(c.eur_amount ?? 0);
   }
   return s;
@@ -169,12 +218,12 @@ export function familyChargedInYear(
 
 export function familyPaidInYear(
   familyPayments: Array<YearPaymentRow>,
-  hebrewYear: number,
+  hy: number,
 ): number {
   let s = 0;
   for (const p of familyPayments) {
     if (!p.payment_date) continue;
-    if (!dateInAcademicYear(p.payment_date, hebrewYear)) continue;
+    if (!dateInAcademicYear(p.payment_date, hy)) continue;
     s += Number(p.eur_amount ?? 0);
   }
   return s;
@@ -183,20 +232,14 @@ export function familyPaidInYear(
 export function familyYearBalance(
   familyCharges: Array<YearChargeRow>,
   familyPayments: Array<YearPaymentRow>,
-  hebrewYear: number,
+  hy: number,
 ): number {
-  return familyChargedInYear(familyCharges, hebrewYear) - familyPaidInYear(familyPayments, hebrewYear);
+  return familyChargedInYear(familyCharges, hy) - familyPaidInYear(familyPayments, hy);
 }
 
 /**
- * The short-stay hide rule. Returns true if the child should be hidden
- * from default views of year Y:
- *
- *   - Was only billed during Elul (6) and/or Tishrei (7) of year Y, AND
- *   - Family's balance for year Y is ≤ 0 (paid in full or overpaid).
- *
- * Callers should separately confirm the child is enrolled in year Y;
- * this function only handles the hide side of the rule.
+ * Hide rule: child was only billed Elul+Tishrei of year Y and the family
+ * has no open balance for year Y.
  */
 export function isShortStayPaidHidden(
   hebcalMonthsBilled: Set<number>,
@@ -207,23 +250,19 @@ export function isShortStayPaidHidden(
 }
 
 /**
- * Full visibility decision for a child in year Y. Use this from list
- * pages (families, children, spreadsheet) to filter the default view.
- *
- * With `includeHidden = true`, the short-stay hide rule is skipped and
- * every enrolled child is returned.
+ * Full visibility decision for a child in year `hy`.
  */
 export function isChildVisibleForYear(
   child: Pick<Child, "enrollment_start_month" | "enrollment_start_year" | "enrollment_end_month" | "enrollment_end_year">,
-  childCharges: Array<Pick<Charge, "month" | "year" | "hebrew_month">>,
+  childCharges: Array<Pick<Charge, "hebrew_month" | "hebrew_year">>,
   familyCharges: Array<YearChargeRow>,
   familyPayments: Array<YearPaymentRow>,
-  hebrewYear: number,
+  hy: number,
   includeHidden = false,
 ): boolean {
-  if (!isChildEnrolledInYear(child, hebrewYear)) return false;
+  if (!isChildEnrolledInYear(child, hy)) return false;
   if (includeHidden) return true;
-  const months = hebrewMonthsBilledInYear(childCharges, hebrewYear);
-  const balance = familyYearBalance(familyCharges, familyPayments, hebrewYear);
+  const months = hebrewMonthsBilledInYear(childCharges, hy);
+  const balance = familyYearBalance(familyCharges, familyPayments, hy);
   return !isShortStayPaidHidden(months, balance);
 }

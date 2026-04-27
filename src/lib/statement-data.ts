@@ -59,8 +59,17 @@ export interface StatementMonthRow {
   /** 'charge' = real billed month; 'projected' = synthesized future month
    *  opened because overpayment rolled forward. */
   kind: "charge" | "projected";
+  /** Gregorian month/year of the charge's Rosh Chodesh (or first-of-month
+   *  for the synthetic opening-balance row, which uses 0/0). Use only for
+   *  FX/display — never as a join key for academic-year filtering. */
   month: number;              // 1..12
   year: number;
+  /** Hebrew identity — the canonical key for matching this row against
+   *  the spreadsheet column grid and academic-year filters. Hebcal
+   *  numbering: 1=Nisan..6=Elul, 7=Tishrei..12/13=Adar/Adar II. The
+   *  opening-balance row uses (0, 0). */
+  hebrewMonth: number;
+  hebrewYear: number;
   periodLabel: string;        // e.g. "תשרי תשפ״ו"
   /** Combined family charge for this month in family currency. */
   totalCharge: number;
@@ -180,17 +189,12 @@ export async function buildFamilyStatement(
   const todayHd = new HDate(now);
   const currentKey = hebrewKey(todayHd.getMonth(), todayHd.getFullYear());
 
-  /** Hebrew identity of a charge row. Uses the stored hebrew_month/year
-   *  when present; falls back to computing from day 1 of the Gregorian
-   *  month so pre-migration rows still group under *some* Hebrew month
-   *  (matching what backfill-hebrew would assign them). */
-  const hebrewIdentityOfCharge = (ch: Charge): { hm: number; hy: number } => {
-    if (ch.hebrew_month != null && ch.hebrew_year != null) {
-      return { hm: Number(ch.hebrew_month), hy: Number(ch.hebrew_year) };
-    }
-    const hd = new HDate(new Date(Number(ch.year), Number(ch.month) - 1, 1));
-    return { hm: hd.getMonth(), hy: hd.getFullYear() };
-  };
+  /** Hebrew identity of a charge row. Migration 008 made hebrew_month/
+   *  hebrew_year NOT NULL on every row, so we can read them directly. */
+  const hebrewIdentityOfCharge = (ch: Charge): { hm: number; hy: number } => ({
+    hm: Number(ch.hebrew_month),
+    hy: Number(ch.hebrew_year),
+  });
 
   /** Gregorian (month, year) of the first day of a given Hebrew month —
    *  used to pick an FX anchor date for projected rows. */
@@ -249,6 +253,8 @@ export async function buildFamilyStatement(
         kind: "charge",
         month: Number(ch.month),
         year: Number(ch.year),
+        hebrewMonth: hm,
+        hebrewYear: hy,
         periodLabel: hebrewMonthLabelFromHebrew(hm, hy),
         totalCharge: 0,
         children: [],
@@ -289,6 +295,8 @@ export async function buildFamilyStatement(
       kind: "charge",
       month: 0,
       year: 0,
+      hebrewMonth: 0,
+      hebrewYear: 0,
       periodLabel: label,
       totalCharge: openingAmount,
       children: [],
@@ -454,6 +462,8 @@ export async function buildFamilyStatement(
       kind: "projected",
       month,
       year,
+      hebrewMonth: hm,
+      hebrewYear: hy,
       periodLabel: hebrewMonthLabelFromHebrew(hm, hy),
       totalCharge: total,
       children: contributors,
@@ -518,6 +528,8 @@ export async function buildFamilyStatement(
     kind: r.kind,
     month: r.month,
     year: r.year,
+    hebrewMonth: r.hebrewMonth,
+    hebrewYear: r.hebrewYear,
     periodLabel: r.periodLabel,
     totalCharge: r.totalCharge,
     children: r.children,

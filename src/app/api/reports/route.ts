@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { HDate } from "@hebcal/core";
 import { validateSession, getUserPermissions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import { cookies } from "next/headers";
-import { hebrewMonthLabel } from "@/lib/hebrew-date";
+import { hebrewMonthLabelFromHebrew } from "@/lib/hebrew-date";
 import {
   loadTablesForCurrencies,
   fillPaymentEurInMemory,
@@ -13,6 +14,8 @@ import {
 import {
   academicYearMonths,
   currentAcademicYear,
+  chargeInAcademicYear,
+  dateInAcademicYear,
 } from "@/lib/academic-year";
 import type { Currency } from "@/lib/types";
 
@@ -66,14 +69,17 @@ export async function GET(req: NextRequest) {
   // selected academic year's window, + payments both in that window
   // AND (if present) in the supplied date range. We fetch both sets
   // with one query each to keep the endpoint snappy.
+  // Coarse SQL range, refined to academic-year membership in JS below.
+  // We widen to Aug 1 of minYear because Rosh-Chodesh-Elul payments can
+  // legitimately fall in late August of the prior civil year.
   const [familiesRes, paymentsYearRes, chargesRes, paymentsRangeRes] = await Promise.all([
     db.from("families").select("id, name, father_name").order("name"),
     db.from("payments")
       .select("id, family_id, amount, currency, payment_date, payment_method, month, year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind")
-      .gte("payment_date", `${minYear}-09-01`)
-      .lte("payment_date", `${maxYear}-08-31`),
+      .gte("payment_date", `${minYear}-08-01`)
+      .lte("payment_date", `${maxYear}-09-30`),
     db.from("charges")
-      .select("id, family_id, amount, currency, month, year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind")
+      .select("id, family_id, amount, currency, month, year, hebrew_month, hebrew_year, eur_amount, eur_rate, eur_rate_date, eur_rate_kind")
       .gte("year", minYear)
       .lte("year", maxYear),
     startParam && endParam
@@ -85,13 +91,19 @@ export async function GET(req: NextRequest) {
   ]);
 
   const families = familiesRes.data ?? [];
-  const payments = (paymentsYearRes.data ?? []) as Array<PaymentEurRow & {
+  const allPaymentsYear = (paymentsYearRes.data ?? []) as Array<PaymentEurRow & {
     family_id: string; payment_method: string; month: number | null; year: number | null;
   }>;
-  const charges = (chargesRes.data ?? []) as Array<ChargeEurRow & { family_id: string }>;
+  const allCharges = (chargesRes.data ?? []) as Array<ChargeEurRow & {
+    family_id: string; hebrew_month: number | null; hebrew_year: number | null;
+  }>;
   const rangePayments = (paymentsRangeRes.data ?? []) as Array<PaymentEurRow & {
     family_id: string; payment_method: string;
   }>;
+
+  // Refine the SQL pre-filter by exact Hebrew academic-year membership.
+  const payments = allPaymentsYear.filter((p) => dateInAcademicYear(p.payment_date, hebrewYear));
+  const charges = allCharges;
 
   const currencies = new Set<Currency>();
   const collect = (c: Currency | null | undefined) => {
@@ -106,16 +118,10 @@ export async function GET(req: NextRequest) {
   fillChargeEurInMemory(charges, tables);
   fillPaymentEurInMemory(rangePayments, tables);
 
-  // Only academic-year-appropriate charges: we want charges that belong
-  // to this academic year's Gregorian window — drop any stray rows where
-  // (year, month) is outside Sep(minYear)→Aug(maxYear).
-  const inYearCharges = charges.filter((c) => {
-    const m = Number(c.month);
-    const y = Number(c.year);
-    if (y === minYear) return m >= 9;
-    if (y === maxYear) return m <= 8;
-    return false;
-  });
+  // Filter to charges whose Hebrew identity belongs to academic year hy.
+  const inYearCharges = charges.filter((c) =>
+    chargeInAcademicYear(c.hebrew_month, c.hebrew_year, hebrewYear),
+  );
 
   // Only count charges whose month has already started — no forward bills.
   const now = new Date();
@@ -136,30 +142,43 @@ export async function GET(req: NextRequest) {
   }
 
   // --- Monthly breakdown for the year (all in EUR). ---
+  // Bucket by Hebrew identity so Rosh-Chodesh-dated rows land in the
+  // right column. Payments are placed by computing the Hebrew month
+  // their payment_date falls in.
   const expectedByMonth = new Map<string, number>();
+  const hebKey = (hm: number, hy: number) => `${hy}-${hm}`;
   for (const c of inYearCharges) {
-    const key = `${c.year}-${c.month}`;
+    if (c.hebrew_month == null || c.hebrew_year == null) continue;
+    const k = hebKey(Number(c.hebrew_month), Number(c.hebrew_year));
     const eur = chargeEurById.get(c.id as string) ?? 0;
-    expectedByMonth.set(key, (expectedByMonth.get(key) ?? 0) + eur);
+    expectedByMonth.set(k, (expectedByMonth.get(k) ?? 0) + eur);
   }
-  const monthlyStats = months.map(({ month, year }) => {
-    // Payments: group by calendar month of payment_date (not by the
-    // optional month/year hint which doesn't drive allocation).
-    const monthPayments = payments.filter((p) => {
-      if (!p.payment_date) return false;
-      const py = Number(p.payment_date.slice(0, 4));
-      const pm = Number(p.payment_date.slice(5, 7));
-      return py === year && pm === month;
-    });
+  const paymentsByHebMonth = new Map<string, typeof payments>();
+  for (const p of payments) {
+    if (!p.payment_date) continue;
+    const py = Number(p.payment_date.slice(0, 4));
+    const pm = Number(p.payment_date.slice(5, 7));
+    const pd = Number(p.payment_date.slice(8, 10));
+    const hd = new HDate(new Date(py, pm - 1, pd));
+    const k = hebKey(hd.getMonth(), hd.getFullYear());
+    const bucket = paymentsByHebMonth.get(k) ?? [];
+    bucket.push(p);
+    paymentsByHebMonth.set(k, bucket);
+  }
+  const monthlyStats = months.map(({ hebrewMonth, hebrewYear: hy, gregMonth, gregYear }) => {
+    const k = hebKey(hebrewMonth, hy);
+    const monthPayments = paymentsByHebMonth.get(k) ?? [];
     const collected = monthPayments.reduce(
       (s, p) => s + (paymentEurById.get(p.id as string) ?? 0),
       0,
     );
-    const expected = expectedByMonth.get(`${year}-${month}`) ?? 0;
+    const expected = expectedByMonth.get(k) ?? 0;
     return {
-      month,
-      year,
-      hebrewLabel: hebrewMonthLabel(month, year),
+      month: gregMonth,
+      year: gregYear,
+      hebrewMonth,
+      hebrewYear: hy,
+      hebrewLabel: hebrewMonthLabelFromHebrew(hebrewMonth, hy),
       collected: Math.round(collected * 100) / 100,
       expected: Math.round(expected * 100) / 100,
       paidCount: monthPayments.length,
