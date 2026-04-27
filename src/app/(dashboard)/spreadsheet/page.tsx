@@ -50,6 +50,12 @@ interface CellData {
   amount: number | null;
   currency: Currency | null;
   notes: string | null;
+  /** Charge owed in this Hebrew month, family currency. Non-null when
+   *  the row had any charge — used to paint "open" cells red even when
+   *  no payment has been allocated yet. */
+  chargeAmount: number | null;
+  /** Remaining residual after FIFO allocation. ~0 ⇒ fully paid. */
+  residual: number | null;
 }
 
 function ActionsRenderer(props: ICellRendererParams & {
@@ -209,7 +215,10 @@ export default function SpreadsheetPage() {
             type: "numericColumn",
             valueGetter: (p: ValueGetterParams) => {
               const cell = p.data?.[key] as CellData;
-              return cell?.amount ?? null;
+              // Show paid amount when there is one; otherwise fall back
+              // to the charge owed so unpaid months render as "€850"
+              // (red) instead of a blank cell.
+              return cell?.amount ?? cell?.chargeAmount ?? null;
             },
             valueFormatter: (p) => {
               if (p.value == null) return "";
@@ -218,12 +227,12 @@ export default function SpreadsheetPage() {
               return formatCurrency(Number(p.value), cur);
             },
             cellStyle: (p) => {
-              const cell = p.data?.[key] as CellData;
-              const monthlyTuition = p.data?.monthlyTuition ?? 0;
-              const amount = cell?.amount ?? 0;
-              if (!monthlyTuition) return {};
-              if (!amount) return { backgroundColor: "#fef2f2", color: "#dc2626" };
-              if (amount >= monthlyTuition) return { backgroundColor: "#f0fdf4", color: "#16a34a" };
+              const cell = p.data?.[key] as CellData | undefined;
+              if (!cell?.chargeAmount && !cell?.amount) return {};
+              const paid = cell?.amount ?? 0;
+              const charge = cell?.chargeAmount ?? 0;
+              if (!paid) return { backgroundColor: "#fef2f2", color: "#dc2626" };
+              if (charge > 0 && paid >= charge) return { backgroundColor: "#f0fdf4", color: "#16a34a" };
               return { backgroundColor: "#fefce8", color: "#ca8a04" };
             },
           },

@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
   ]);
   if (famRes.error) return NextResponse.json({ error: famRes.error.message }, { status: 500 });
 
-  const chargeRowsAll = (chargesRes.data ?? []) as Array<ChargeEurRow & Pick<Charge, "family_id" | "child_id" | "month" | "year" | "hebrew_month">>;
+  const chargeRowsAll = (chargesRes.data ?? []) as Array<ChargeEurRow & Pick<Charge, "family_id" | "child_id" | "month" | "year" | "hebrew_month" | "hebrew_year">>;
   const paymentRowsAll = (paymentsRes.data ?? []) as Array<PaymentEurRow & Pick<Payment, "family_id" | "payment_date">>;
   const children = (childrenRes.data ?? []) as Array<Pick<Child, "id" | "family_id" | "enrollment_start_month" | "enrollment_start_year" | "enrollment_end_month" | "enrollment_end_year" | "is_active">>;
 
